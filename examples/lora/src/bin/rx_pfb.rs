@@ -9,7 +9,7 @@ use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
 use lora::{
     optfir, Decoder, Deinterleaver, FftDemod, FrameSync, GrayMapping, HammingDec, HeaderDecoder,
-    HeaderMode, MmseResampler, PfbChannelizer, StreamDeinterleaver,
+    HeaderMode, MmseResampler, PfbChannelizer, StreamDeinterleaver, StreamDuplicator,
 };
 use rustfft::num_complex::Complex32;
 use seify::Device;
@@ -162,58 +162,66 @@ fn main() -> Result<()> {
             args.channel_spacing as f32 / args.bandwidth as f32,
         ));
         fg.connect_stream(channelizer, format!("out{i}"), resampler, "in")?;
+        let duplicator = fg.add_block(StreamDuplicator::<Complex32>::new(6));
+        fg.connect_stream(resampler, format!("out"), duplicator, "in")?;
         let offset = offset.unwrap();
         let center_freq = args.center_freq
             + args.rx_freq_offset
             + (offset * args.channel_spacing as isize) as f64;
         println!(
-            "connecting {:.1}MHz FrameSync to channel {}",
+            "connecting {:.1}MHz chain to channel {}",
             center_freq / 1.0e6,
             i
         );
-        let frame_sync = fg.add_block(FrameSync::new(
-            center_freq as u32,
-            args.bandwidth as u32,
-            args.spreading_factor,
-            false,
-            vec![0x12], // TODO 18?
-            1,
-            None,
-        ));
-        // fg.connect_stream_with_type(
-        //     src,
-        //     "out",
-        //     frame_sync,
-        //     "in",
-        //     Circular::with_size(2 * 4 * 8192 * 4),
-        // )?;
-        fg.connect_stream_with_type(
-            resampler,
-            "out",
-            frame_sync,
-            "in",
-            Circular::with_size(2 * 4 * 8192 * 4),
-        )?;
-        let null_sink2 = fg.add_block(NullSink::<f32>::new());
-        fg.connect_stream(frame_sync, "log_out", null_sink2, "in")?;
-        let fft_demod = fg.add_block(FftDemod::new(soft_decoding, true, args.spreading_factor));
-        fg.connect_stream(frame_sync, "out", fft_demod, "in")?;
-        let gray_mapping = fg.add_block(GrayMapping::new(soft_decoding));
-        fg.connect_stream(fft_demod, "out", gray_mapping, "in")?;
-        let deinterleaver = fg.add_block(Deinterleaver::new(soft_decoding));
-        fg.connect_stream(gray_mapping, "out", deinterleaver, "in")?;
-        let hamming_dec = fg.add_block(HammingDec::new(soft_decoding));
-        fg.connect_stream(deinterleaver, "out", hamming_dec, "in")?;
-        let header_decoder = fg.add_block(HeaderDecoder::new(HeaderMode::Explicit, false));
-        fg.connect_stream(hamming_dec, "out", header_decoder, "in")?;
-        let decoder = fg.add_block(Decoder::new());
-        let udp_data = fg.add_block(BlobToUdp::new("127.0.0.1:55555"));
-        let udp_rftap = fg.add_block(BlobToUdp::new("127.0.0.1:55556"));
-        fg.connect_message(header_decoder, "out", decoder, "in")?;
-        fg.connect_message(decoder, "data", udp_data, "in")?;
-        fg.connect_message(decoder, "rftap", udp_rftap, "in")?;
+        for sf in 7..13 {
+            println!(
+                "connecting {:.1}MHz FrameSync with spreading factor {sf}",
+                center_freq / 1.0e6,
+            );
+            let frame_sync = fg.add_block(FrameSync::new(
+                center_freq as u32,
+                args.bandwidth as u32,
+                sf,
+                false,
+                vec![0x12], // TODO 18?
+                1,
+                None,
+            ));
+            // fg.connect_stream_with_type(
+            //     src,
+            //     "out",
+            //     frame_sync,
+            //     "in",
+            //     Circular::with_size(2 * 4 * 8192 * 4),
+            // )?;
+            fg.connect_stream_with_type(
+                duplicator,
+                format!("out{}", sf - 7),
+                frame_sync,
+                "in",
+                Circular::with_size(2 * 4 * 8192 * 4),
+            )?;
+            let null_sink2 = fg.add_block(NullSink::<f32>::new());
+            fg.connect_stream(frame_sync, "log_out", null_sink2, "in")?;
+            let fft_demod = fg.add_block(FftDemod::new(soft_decoding, true, sf));
+            fg.connect_stream(frame_sync, "out", fft_demod, "in")?;
+            let gray_mapping = fg.add_block(GrayMapping::new(soft_decoding));
+            fg.connect_stream(fft_demod, "out", gray_mapping, "in")?;
+            let deinterleaver = fg.add_block(Deinterleaver::new(soft_decoding));
+            fg.connect_stream(gray_mapping, "out", deinterleaver, "in")?;
+            let hamming_dec = fg.add_block(HammingDec::new(soft_decoding));
+            fg.connect_stream(deinterleaver, "out", hamming_dec, "in")?;
+            let header_decoder = fg.add_block(HeaderDecoder::new(HeaderMode::Explicit, false));
+            fg.connect_stream(hamming_dec, "out", header_decoder, "in")?;
+            let decoder = fg.add_block(Decoder::new());
+            let udp_data = fg.add_block(BlobToUdp::new("127.0.0.1:55555"));
+            let udp_rftap = fg.add_block(BlobToUdp::new("127.0.0.1:55556"));
+            fg.connect_message(header_decoder, "out", decoder, "in")?;
+            fg.connect_message(decoder, "data", udp_data, "in")?;
+            fg.connect_message(decoder, "rftap", udp_rftap, "in")?;
 
-        fg.connect_message(header_decoder, "frame_info", frame_sync, "frame_info")?;
+            fg.connect_message(header_decoder, "frame_info", frame_sync, "frame_info")?;
+        }
     }
 
     let _ = rt.run(fg);

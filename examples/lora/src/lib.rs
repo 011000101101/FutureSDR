@@ -37,6 +37,8 @@ pub mod utilities;
 pub use utilities::*;
 pub mod stream_deinterleaver;
 pub use stream_deinterleaver::StreamDeinterleaver;
+pub mod stream_duplicator;
+pub use stream_duplicator::StreamDuplicator;
 pub mod pfb_channelizer_ccf;
 pub use pfb_channelizer_ccf::PfbChannelizer;
 pub mod interpolator_taps;

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 BUILD_TYPE=""
-#BUILD_TYPE="--release"
+BUILD_TYPE="--release"
 CENTER_FREQ="--center-freq=867000000"
 RX_OFFSET="--rx-freq-offset=0.9e6"
 DEVICE_FILTER="--device-filter=driver=aaronia_http,tx_url=http://172.18.0.1:54665,url=http://172.18.0.1:54664"
@@ -11,7 +11,7 @@ RX_GAIN="--rx-gain 10"
 RX_ANTENNA=""
 #TX_ANTENNA=""
 PFB_ARGS="--num-channels 8 --channel-spacing 200000"
-SPREADING_FACTOR="--spreading-factor 8"
+SPREADING_FACTOR="--spreading-factor 12"
 BANDWIDTH="--bandwidth 125000"
 
 export FUTURESDR_LOG_LEVEL=debug

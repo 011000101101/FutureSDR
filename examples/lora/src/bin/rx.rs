@@ -9,6 +9,7 @@ use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
+use seify::Device;
 
 use lora::Decoder;
 use lora::Deinterleaver;
@@ -25,6 +26,9 @@ struct Args {
     /// RX Antenna
     #[clap(long)]
     antenna: Option<String>,
+    /// Soapy device Filter
+    #[clap(long)]
+    device_filter: Option<String>,
     /// Seify Args
     #[clap(short, long)]
     args: Option<String>,
@@ -52,8 +56,11 @@ fn main() -> Result<()> {
     let rt = Runtime::new();
     let mut fg = Flowgraph::new();
 
+    let filter = args.device_filter.unwrap_or_else(String::new);
+    let seify_dev = Device::from_args(&*filter).unwrap();
     let mut src = SourceBuilder::new()
-        .sample_rate(1e6)
+        .device(seify_dev)
+        .sample_rate(args.bandwidth as f64)
         .frequency(args.frequency)
         .gain(args.gain);
 
@@ -65,8 +72,8 @@ fn main() -> Result<()> {
     }
     let src = fg.add_block(src.build().unwrap());
 
-    let downsample =
-        FirBuilder::new_resampling::<Complex32, Complex32>(1, 1000000 / args.bandwidth);
+    // let downsample =
+    //     FirBuilder::new_resampling::<Complex32, Complex32>(1, 1000000 / args.bandwidth);
     let frame_sync = FrameSync::new(
         args.frequency as u32,
         args.bandwidth as u32,
@@ -86,7 +93,9 @@ fn main() -> Result<()> {
     let udp_data = BlobToUdp::new("127.0.0.1:55555");
     let udp_rftap = BlobToUdp::new("127.0.0.1:55556");
 
-    connect!(fg, src > downsample [Circular::with_size(2 * 4 * 8192 * 4)] frame_sync > fft_demod > gray_mapping > deinterleaver > hamming_dec > header_decoder;
+    connect!(fg, src
+        // > downsample
+        [Circular::with_size(2 * 4 * 8192 * 4)] frame_sync > fft_demod > gray_mapping > deinterleaver > hamming_dec > header_decoder;
         frame_sync.log_out > null_sink;
         header_decoder.frame_info | frame_sync.frame_info;
         header_decoder | decoder;

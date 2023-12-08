@@ -834,8 +834,9 @@ impl Kernel for FrameSync {
                 self.bin_idx = bin_idx_new_opt;
                 if self.symbol_cnt == self.m_n_up_req {
                     info!(
-                        "..:: Frame Detected ({:.1}MHz)",
-                        self.m_center_freq as f32 / 1.0e6
+                        "..:: Frame Detected ({:.1}MHz, SF{})",
+                        self.m_center_freq as f32 / 1.0e6,
+                        self.m_sf
                     );
                     // info!(
                     //     "FrameSync: detected required nuber of upchirps ({})",
