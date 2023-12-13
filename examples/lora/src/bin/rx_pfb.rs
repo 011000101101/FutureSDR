@@ -211,7 +211,7 @@ fn main() -> Result<()> {
             fg.connect_stream(gray_mapping, "out", deinterleaver, "in")?;
             let hamming_dec = fg.add_block(HammingDec::new(soft_decoding));
             fg.connect_stream(deinterleaver, "out", hamming_dec, "in")?;
-            let header_decoder = fg.add_block(HeaderDecoder::new(HeaderMode::Explicit, false));
+            let header_decoder = fg.add_block(HeaderDecoder::new(HeaderMode::Explicit, sf >= 12));
             fg.connect_stream(hamming_dec, "out", header_decoder, "in")?;
             let decoder = fg.add_block(Decoder::new());
             let udp_data = fg.add_block(BlobToUdp::new("127.0.0.1:55555"));

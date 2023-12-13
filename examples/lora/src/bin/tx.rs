@@ -126,7 +126,8 @@ fn main() -> Result<()> {
         args.spreading_factor,
         args.sample_rate as usize,
         args.bandwidth,
-        vec![8, 16],
+        // vec![8, 16],
+        vec![42, 12],
         20 * (1 << args.spreading_factor) * args.sample_rate as usize / args.bandwidth,
         Some(8),
     ));
@@ -136,7 +137,8 @@ fn main() -> Result<()> {
         "out",
         sink,
         "in",
-        Circular::with_size(2 * 4 * 8192 * 4 * 8),
+        // Circular::with_size(2 * 4 * 8192 * 4 * 8),
+        Circular::with_size(2 * 4 * 8192 * 4 * 8 * 16),
     )?;
 
     // if tx_interval is set, send messages periodically
@@ -145,7 +147,6 @@ fn main() -> Result<()> {
         rt.block_on(async move {
             let mut counter: usize = 0;
             loop {
-                Timer::after(Duration::from_secs_f32(tx_interval)).await;
                 let dummy_packet = format!("hello world! {:02}", counter).to_string();
                 // let dummy_packet = "hello world!1".to_string();
                 handle
@@ -155,6 +156,7 @@ fn main() -> Result<()> {
                 debug!("sending sample packet.");
                 counter += 1;
                 counter %= 100;
+                Timer::after(Duration::from_secs_f32(tx_interval)).await;
             }
         });
     } else {

@@ -12,7 +12,7 @@ TX_GAIN="--tx-gain 40"
 #RX_ANTENNA=""
 TX_ANTENNA=""
 SAMPLE_RATE="--sample-rate 125000"
-TX_INTERVAL="--tx-interval 1"
+TX_INTERVAL="--tx-interval 3"
 SPREADING_FACTOR="--spreading-factor 8"
 BANDWIDTH="--bandwidth 125000"
 

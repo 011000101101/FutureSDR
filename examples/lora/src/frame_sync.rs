@@ -39,7 +39,6 @@ enum DecoderState {
     Detect,
     Sync,
     SfoCompensation,
-    // Stop,
 }
 #[repr(usize)]
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -585,10 +584,7 @@ impl FrameSync {
             // info!("FrameSync: received header info");
 
             if m_invalid_header {
-                self.m_state = DecoderState::Detect;
-                self.symbol_cnt = SyncState::NetId2;
-                self.k_hat = 0;
-                self.m_sto_frac = 0.;
+                self.reset()
             } else {
                 let m_ldro: LdroMode = if ldro_mode_tmp == LdroMode::AUTO {
                     if (1_usize << self.m_sf) as f32 * 1e3 / self.m_bw as f32 > LDRO_MAX_DURATION_MS
@@ -670,6 +666,618 @@ impl FrameSync {
     //     // https://www.gnuradio.org/doc/doxygen/classgr_1_1block.html#a63d67fd758b70c6f2d7b7d4edcec53b3
     //     // set_output_multiple(m_number_of_bins);  // unnecessary, noutput_items is only used for the noutput_items < m_number_of_bins check, which is equal noutput_items / self.m_number_of_bins < 1
     // }
+
+    fn detect(&mut self, input: &[Complex32]) -> (isize, usize) {
+        let bin_idx_new_opt = FrameSync::get_symbol_val(&self.in_down, &self.m_downchirp);
+
+        let condition = if let Some(bin_idx_new) = bin_idx_new_opt {
+            if ((((bin_idx_new as i32 - self.bin_idx.map(|x| x as i32).unwrap_or(-1)).abs() + 1)
+                % self.m_number_of_bins as i32)
+                - 1)
+            .abs()
+                <= 1
+            {
+                if let Some(bin_idx) = self.bin_idx {
+                    if self.symbol_cnt == SyncState::NetId2 {
+                        self.preamb_up_vals[0] = bin_idx;
+                    }
+                }
+                self.preamb_up_vals[Into::<usize>::into(self.symbol_cnt)] = bin_idx_new;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if condition {
+            let preamble_raw_idx_offset =
+                self.m_number_of_bins * Into::<usize>::into(self.symbol_cnt);
+            let count = self.m_number_of_bins;
+            self.preamble_raw[preamble_raw_idx_offset..(preamble_raw_idx_offset + count)]
+                .copy_from_slice(&self.in_down[0..count]);
+            let preamble_raw_up_idx_offset =
+                self.m_samples_per_symbol * Into::<usize>::into(self.symbol_cnt);
+            let count = self.m_samples_per_symbol;
+            // println!("{}", count);
+            // println!("{}", preamble_raw_up_idx_offset);
+            // println!("{}", (self.m_os_factor / 2));
+            // println!("{}", self.preamble_raw_up.len());
+            // println!("{}", input.len());
+            self.preamble_raw_up[preamble_raw_up_idx_offset..(preamble_raw_up_idx_offset + count)]
+                .copy_from_slice(&input[(self.m_os_factor / 2)..(self.m_os_factor / 2 + count)]);
+
+            self.increase_symbol_count();
+            // info!("symbol_cnt: {}", Into::<usize>::into(self.symbol_cnt));
+        } else {
+            let count = self.m_number_of_bins;
+            self.preamble_raw[0..count].copy_from_slice(&self.in_down[0..count]);
+            let count = self.m_samples_per_symbol;
+            self.preamble_raw_up[0..count]
+                .copy_from_slice(&input[(self.m_os_factor / 2)..(self.m_os_factor / 2 + count)]);
+
+            self.transition_state(DecoderState::Detect, Some(SyncState::NetId2));
+        }
+        self.bin_idx = bin_idx_new_opt;
+        let items_to_consume = if self.symbol_cnt == self.m_n_up_req {
+            info!(
+                "..:: Frame Detected ({:.1}MHz, SF{})",
+                self.m_center_freq as f32 / 1.0e6,
+                self.m_sf
+            );
+            // info!(
+            //     "FrameSync: detected required nuber of upchirps ({})",
+            //     Into::<usize>::into(self.m_n_up_req)
+            // );
+            self.additional_upchirps = 0;
+            self.k_hat = most_frequent(&self.preamb_up_vals);
+            let input_idx_offset = (0.75 * self.m_samples_per_symbol as f32
+                - self.k_hat as f32 * self.m_os_factor as f32)
+                as usize;
+            let count = self.m_samples_per_symbol / 4;
+            self.net_id_samp[0..count]
+                .copy_from_slice(&input[input_idx_offset..(input_idx_offset + count)]);
+
+            // perform the coarse synchronization
+            self.transition_state(DecoderState::Sync, Some(SyncState::NetId1));
+            self.m_os_factor as isize * (self.m_number_of_bins as isize - self.k_hat as isize)
+        } else {
+            // info!(
+            //     "FrameSync: did not detect required nuber of upchirps ({}/{})",
+            //     Into::<usize>::into(self.symbol_cnt),
+            //     Into::<usize>::into(self.m_n_up_req)
+            // );
+            self.m_samples_per_symbol as isize
+        };
+        (items_to_consume, 0)
+    }
+
+    fn sync_quarter_down(
+        &mut self,
+        sio: &mut StreamIo,
+        input: &[Complex32],
+        out: &mut [Complex32],
+        nitems_to_process: usize,
+    ) -> (isize, usize) {
+        let mut items_to_consume = 0;
+        let mut items_to_output = 0;
+        let mut sync_log_out: &mut [f32] = &mut [];
+        let m_should_log = if sio.outputs().len() == 2 {
+            sync_log_out = sio.output(1).slice::<f32>();
+            true
+        } else {
+            false
+        };
+        let count = self.m_samples_per_symbol;
+        self.additional_symbol_samp[self.m_samples_per_symbol..(self.m_samples_per_symbol + count)]
+            .copy_from_slice(&input[0..count]);
+        let m_cfo_int = if let Some(down_val) = self.down_val {
+            // info!("down_val: {}", down_val);
+            if down_val < self.m_number_of_bins / 2 {
+                down_val as isize / 2
+            } else {
+                (down_val as isize - self.m_number_of_bins as isize) / 2
+            }
+        } else {
+            panic!("self.down_val must not be None here.")
+        };
+        // info!("m_cfo_int: {}", m_cfo_int);
+        let cfo_int_modulo = my_modulo(m_cfo_int, self.m_number_of_bins);
+        // info!(
+        //     "(m_cfo_int % self.m_number_of_bins as isize): {}",
+        //     cfo_int_modulo
+        // );
+
+        // correct STOint and CFOint in the preamble upchirps
+        self.preamble_upchirps.rotate_left(cfo_int_modulo);
+
+        let cfo_int_correc: Vec<Complex32> = (0_usize
+            ..((Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps)
+                * self.m_number_of_bins))
+            .map(|x| {
+                Complex32::from_polar(
+                    1.,
+                    -2. * PI * m_cfo_int as f32 / self.m_number_of_bins as f32 * x as f32,
+                )
+            })
+            .collect();
+
+        self.preamble_upchirps =
+            volk_32fc_x2_multiply_32fc(&self.preamble_upchirps, &cfo_int_correc); // count: up_symb_to_use * m_number_of_bins
+
+        // correct SFO in the preamble upchirps
+
+        self.sfo_hat = (m_cfo_int as f32 + self.m_cfo_frac as f32) * self.m_bw as f32
+            / self.m_center_freq as f32;
+        let clk_off = self.sfo_hat / self.m_number_of_bins as f32;
+        let fs = self.m_bw as f32;
+        let fs_p = fs * (1. - clk_off);
+        let n = self.m_number_of_bins;
+        let sfo_corr_vect: Vec<Complex32> = (0..((Into::<usize>::into(self.m_n_up_req)
+            + self.additional_upchirps)
+            * self.m_number_of_bins))
+            .map(|x| {
+                Complex32::from_polar(
+                    1.,
+                    -2. * PI * ((x % n) * (x % n)) as f32 / 2. / n as f32
+                        * (fs / fs_p * fs / fs_p - 1.)
+                        + ((x / n) as f32 * (fs / fs_p * fs / fs_p - fs / fs_p)
+                            + fs / 2. * (1. / fs - 1. / fs_p))
+                            * (x % n) as f32,
+                )
+            })
+            .collect();
+
+        let count = self.up_symb_to_use * self.m_number_of_bins;
+        let tmp =
+            volk_32fc_x2_multiply_32fc(&self.preamble_upchirps[0..count], &sfo_corr_vect[0..count]);
+        self.preamble_upchirps[0..count].copy_from_slice(&tmp);
+
+        let tmp_sto_frac = self.estimate_sto_frac(); // better estimation of sto_frac in the beginning of the upchirps
+        let diff_sto_frac = self.m_sto_frac - tmp_sto_frac;
+
+        if diff_sto_frac.abs() <= (self.m_os_factor - 1) as f32 / self.m_os_factor as f32 {
+            // avoid introducing off-by-one errors by estimating fine_sto=-0.499 , rough_sto=0.499
+            self.m_sto_frac = tmp_sto_frac;
+        }
+
+        // get SNR estimate from preamble
+        // downsample preab_raw
+        // apply sto correction
+        let preamble_raw_up_offset = self.m_os_factor * (self.m_number_of_bins - self.k_hat)
+            - FrameSync::my_roundf(self.m_os_factor as f32 * self.m_sto_frac) as usize;
+        let count = (Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps)
+            * self.m_number_of_bins;
+        let mut corr_preamb: Vec<Complex32> = self.preamble_raw_up
+            [preamble_raw_up_offset..(preamble_raw_up_offset + self.m_os_factor * count)]
+            .iter()
+            .step_by(self.m_os_factor)
+            .copied()
+            .collect();
+        corr_preamb.rotate_left(cfo_int_modulo);
+        // apply cfo correction
+        corr_preamb = volk_32fc_x2_multiply_32fc(&corr_preamb, &cfo_int_correc);
+        for i in 0..(Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps) {
+            let offset = self.m_number_of_bins * i;
+            let end_range = self.m_number_of_bins * (i + 1);
+            let tmp = volk_32fc_x2_multiply_32fc(
+                &corr_preamb[offset..end_range],
+                &self.cfo_frac_correc[0..self.m_number_of_bins],
+            );
+            corr_preamb[offset..end_range].copy_from_slice(&tmp);
+        }
+
+        // //apply sfo correction
+        corr_preamb = volk_32fc_x2_multiply_32fc(&corr_preamb, &sfo_corr_vect);
+
+        let mut snr_est = 0.0_f32;
+        for i in 0..self.up_symb_to_use {
+            snr_est += self.determine_snr(
+                &corr_preamb[(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)],
+            );
+        }
+        snr_est /= self.up_symb_to_use as f32;
+
+        // update sto_frac to its value at the beginning of the net id
+        self.m_sto_frac += self.sfo_hat * self.m_preamb_len as f32;
+        // ensure that m_sto_frac is in [-0.5,0.5]
+        if self.m_sto_frac.abs() > 0.5 {
+            self.m_sto_frac += if self.m_sto_frac > 0. { -1. } else { 1. };
+        }
+        // decim net id according to new sto_frac and sto int
+        // start_off gives the offset in the net_id_samp vector required to be aligned in time (CFOint is equivalent to STOint since upchirp_val was forced to 0)
+        let start_off = (self.m_os_factor as isize / 2
+            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
+            + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + m_cfo_int))
+            as usize;
+        // info!("self.m_os_factor / 2: {}", self.m_os_factor / 2);
+        // info!(
+        //     "FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32): {}",
+        //     FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
+        // );
+        // info!(
+        //     "self.m_os_factor * (self.m_number_of_bins / 4 + m_cfo_int): {}",
+        //     self.m_os_factor as isize
+        //         * (self.m_number_of_bins as isize / 4 + m_cfo_int)
+        // );
+        // info!("self.m_number_of_bins: {}", self.m_number_of_bins);
+        // info!("self.m_sto_frac: {}", self.m_sto_frac);
+        // info!("m_cfo_int: {}", m_cfo_int);
+        // info!("start_offset: {}", start_off);
+        let count = 2 * self.m_number_of_bins;
+        let mut net_ids_samp_dec: Vec<Complex32> = self.net_id_samp
+            [start_off..(start_off + count * self.m_os_factor)]
+            .iter()
+            .step_by(self.m_os_factor)
+            .copied()
+            .collect();
+        net_ids_samp_dec = volk_32fc_x2_multiply_32fc(&net_ids_samp_dec, &cfo_int_correc);
+
+        // correct CFO_frac in the network ids
+        let tmp = volk_32fc_x2_multiply_32fc(
+            &net_ids_samp_dec[0..self.m_number_of_bins],
+            &self.cfo_frac_correc,
+        );
+        net_ids_samp_dec[0..self.m_number_of_bins].copy_from_slice(&tmp);
+        let tmp = volk_32fc_x2_multiply_32fc(
+            &net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)],
+            &self.cfo_frac_correc,
+        );
+        net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)].copy_from_slice(&tmp);
+
+        let netid1 = FrameSync::get_symbol_val(
+            &net_ids_samp_dec[0..self.m_number_of_bins],
+            &self.m_downchirp,
+        )
+        .unwrap();
+        let netid2 = FrameSync::get_symbol_val(
+            &net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)],
+            &self.m_downchirp,
+        )
+        .unwrap();
+        let mut one_symbol_off = false;
+        let mut off_by_one_id = false;
+
+        info!("netid1: {} (soll {})", netid1, self.m_sync_words[0]);
+        info!("netid2: {} (soll {})", netid2, self.m_sync_words[1]);
+
+        if false
+        // TODO
+        // if (netid1 as i32 - self.m_sync_words[0] as i32).abs() > 2
+        // wrong id 1, (we allow an offset of 2)
+        {
+            // check if we are in fact checking the second net ID and that the first one was considered as a preamble upchirp
+            if (netid1 as i32 - self.m_sync_words[1] as i32).abs() <= 2 {
+                let net_id_off = netid1 as isize - self.m_sync_words[1] as isize;
+                for i in (self.m_preamb_len - 2)
+                    ..(Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps)
+                {
+                    if FrameSync::get_symbol_val(
+                        &corr_preamb
+                            [(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)],
+                        &self.m_downchirp,
+                    )
+                    .unwrap() as isize
+                        + net_id_off
+                        == self.m_sync_words[0] as isize
+                    // found the first netID
+                    {
+                        one_symbol_off = true;
+                        if net_id_off != 0 && net_id_off.abs() > 1 {
+                            warn!("[frame_sync.rs] net id offset >1: {}", net_id_off);
+                        }
+                        if m_should_log {
+                            off_by_one_id = net_id_off != 0;
+                        }
+                        items_to_consume = -(self.m_os_factor as isize) * net_id_off;
+                        // the first symbol was mistaken for the end of the downchirp. we should correct and output it.
+
+                        let start_off = self.m_os_factor as isize / 2
+                            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
+                            + self.m_os_factor as isize
+                                * (self.m_number_of_bins as isize / 4 + m_cfo_int);
+                        for i in (start_off..(self.m_samples_per_symbol as isize * 5 / 4))
+                            .step_by(self.m_os_factor)
+                        {
+                            assert!((i - start_off) > 0);
+                            assert!(i > 0);
+                            out[(i - start_off) as usize / self.m_os_factor] =
+                                self.additional_symbol_samp[i as usize];
+                        }
+                        items_to_output = self.m_number_of_bins;
+                        self.frame_cnt += 1;
+                    }
+                }
+                if !one_symbol_off {
+                    self.reset();
+                    return (items_to_consume, 0);
+                    // items_to_consume = 0;
+                }
+            } else {
+                self.reset();
+                return (items_to_consume, 0);
+                // items_to_consume = 0;
+            }
+        } else {
+            // net ID 1 valid
+            let net_id_off = netid1 as isize - self.m_sync_words[0] as isize;
+            if false
+            // TODO
+            // if ((netid2 as isize - net_id_off) % self.m_number_of_bins as isize)
+            //     as usize
+            //     != self.m_sync_words[1]
+            // wrong id 2
+            {
+                self.reset();
+                return (items_to_consume, 0);
+                // items_to_consume = 0;
+            } else {
+                // TODO reactivate
+                // if net_id_off != 0 && net_id_off.abs() > 1 {
+                //     warn!("[frame_sync.rs] net id offset >1: {}", net_id_off);
+                // }
+                // if m_should_log {
+                //     off_by_one_id = net_id_off != 0;
+                // }
+                // items_to_consume = -(self.m_os_factor as isize) * net_id_off;
+                // TODO
+                items_to_consume = 0;
+                self.frame_cnt += 1;
+            }
+        }
+        self.m_received_head = false;
+        items_to_consume +=
+            self.m_samples_per_symbol as isize / 4 + self.m_os_factor as isize * m_cfo_int;
+        if items_to_consume <= nitems_to_process as isize {
+            // info!("Frame Detected!!!!!!!!!!");
+            // update sto_frac to its value at the payload beginning
+            self.m_sto_frac += self.sfo_hat * 4.25;
+            self.sfo_cum = ((self.m_sto_frac * self.m_os_factor as f32)
+                - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32) as f32)
+                / self.m_os_factor as f32;
+
+            let mut frame_info: HashMap<String, Pmt> = HashMap::new();
+
+            frame_info.insert(String::from("is_header"), Pmt::Bool(true));
+            frame_info.insert(String::from("cfo_int"), Pmt::F32(m_cfo_int as f32));
+            frame_info.insert(String::from("cfo_frac"), Pmt::F64(self.m_cfo_frac));
+            frame_info.insert(String::from("sf"), Pmt::Usize(self.m_sf));
+            let frame_info_pmt = Pmt::MapStrPmt(frame_info);
+
+            sio.output(0).add_tag(
+                0,
+                Tag::NamedAny("frame_info".to_string(), Box::new(frame_info_pmt)),
+            );
+            if one_symbol_off {
+                self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId2));
+            } else {
+                self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId1));
+            };
+            // let mut snr_est2: f32 = 0.;  // TODO unused
+
+            if m_should_log {
+                // estimate SNR
+
+                // for i in 0..self.up_symb_to_use {
+                //     snr_est2 += self.determine_snr(
+                //         &self.preamble_upchirps[(i * self.m_number_of_bins)
+                //             ..((i + 1) * self.m_number_of_bins)],
+                //     );
+                // }
+                // snr_est2 /= self.up_symb_to_use as f32;
+                let cfo_log = m_cfo_int as f32 + self.m_cfo_frac as f32;
+                let sto_log = (self.k_hat as isize - m_cfo_int) as f32 + self.m_sto_frac;
+                let srn_log = snr_est;
+                let sfo_log = self.sfo_hat;
+
+                sync_log_out[0] = srn_log;
+                sync_log_out[1] = cfo_log;
+                sync_log_out[2] = sto_log;
+                sync_log_out[3] = sfo_log;
+                sync_log_out[4] = if off_by_one_id { 1. } else { 0. };
+                sio.output(1).produce(5);
+            }
+            // #ifdef PRINT_INFO
+            //
+            //                         std::cout << "[frame_sync_impl.cc] " << frame_cnt << " CFO estimate: " << m_cfo_int + m_cfo_frac << ", STO estimate: " << k_hat - m_cfo_int + m_sto_frac << " snr est: " << snr_est << std::endl;
+            // #endif
+        } else {
+            self.reset();
+            return (0, 0);
+        }
+        (items_to_consume, items_to_output)
+    }
+
+    fn sync(
+        &mut self,
+        sio: &mut StreamIo,
+        input: &[Complex32],
+        out: &mut [Complex32],
+        nitems_to_process: usize,
+    ) -> (isize, usize) {
+        let mut items_to_output = 0;
+        if !self.cfo_frac_sto_frac_est {
+            // info!(
+            //     " want {} samples, got {}",
+            //     self.m_number_of_bins, self.k_hat,
+            // );
+            let (preamble_upchirps_tmp, cfo_frac_tmp) = self.estimate_cfo_frac_bernier(
+                &self.preamble_raw[(self.m_number_of_bins - self.k_hat)..],
+            );
+            self.preamble_upchirps = preamble_upchirps_tmp;
+            self.m_cfo_frac = cfo_frac_tmp;
+            self.m_sto_frac = self.estimate_sto_frac();
+            // create correction vector
+            self.cfo_frac_correc = (0..self.m_number_of_bins)
+                .map(|x| {
+                    Complex32::from_polar(
+                        1.,
+                        -2. * PI * self.m_cfo_frac as f32 / self.m_number_of_bins as f32 * x as f32,
+                    )
+                })
+                .collect();
+            self.cfo_frac_sto_frac_est = true;
+        }
+        let mut items_to_consume = self.m_samples_per_symbol as isize;
+        // apply cfo correction
+        let symb_corr = volk_32fc_x2_multiply_32fc(&self.in_down, &self.cfo_frac_correc);
+
+        self.bin_idx = FrameSync::get_symbol_val(&symb_corr, &self.m_downchirp);
+        match self.symbol_cnt {
+            SyncState::NetId1 => {
+                // assert!(
+                //     nitems_to_process
+                //         >= self.m_os_factor / 2
+                //             + self.k_hat * self.m_os_factor
+                //             + self.m_samples_per_symbol
+                // );
+                if nitems_to_process
+                    < self.m_os_factor / 2
+                        + self.k_hat * self.m_os_factor
+                        + self.m_samples_per_symbol
+                {
+                    // warn!(
+                    //     "FrameSync: not enough samples in input buffer, waiting for more."
+                    // );
+                    return (0, 0);
+                }
+                if self.bin_idx.is_some()
+                    && (self.bin_idx.unwrap() == 0
+                        || self.bin_idx.unwrap() == 1
+                        || self.bin_idx.unwrap() == self.m_number_of_bins - 1)
+                {
+                    // look for additional upchirps. Won't work if network identifier 1 equals 2^sf-1, 0 or 1!
+                    let input_offset = (0.75 * self.m_samples_per_symbol as f32) as usize;
+                    let count = self.m_samples_per_symbol / 4;
+                    self.net_id_samp[0..count]
+                        .copy_from_slice(&input[input_offset..(input_offset + count)]);
+                    if self.additional_upchirps >= 3 {
+                        self.preamble_raw_up.rotate_left(self.m_samples_per_symbol);
+                        let preamble_raw_up_offset =
+                            self.m_samples_per_symbol * (Into::<usize>::into(self.m_n_up_req) + 3);
+                        let input_offset = self.m_os_factor / 2 + self.k_hat * self.m_os_factor;
+                        let count = self.m_samples_per_symbol;
+                        self.preamble_raw_up
+                            [preamble_raw_up_offset..(preamble_raw_up_offset + count)]
+                            .copy_from_slice(&input[input_offset..(input_offset + count)]);
+                    } else {
+                        let preamble_raw_up_offset = self.m_samples_per_symbol
+                            * (Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps);
+                        let input_offset = self.m_os_factor / 2 + self.k_hat * self.m_os_factor;
+                        let count = self.m_samples_per_symbol;
+                        self.preamble_raw_up
+                            [preamble_raw_up_offset..(preamble_raw_up_offset + count)]
+                            .copy_from_slice(&input[input_offset..(input_offset + count)]);
+                        self.additional_upchirps += 1;
+                    }
+                } else {
+                    // network identifier 1 correct or off by one
+                    let net_id_samp_offset = self.m_samples_per_symbol / 4;
+                    let count = self.m_samples_per_symbol;
+                    self.net_id_samp[net_id_samp_offset..(net_id_samp_offset + count)]
+                        .copy_from_slice(&input[0..count]);
+                    self.net_ids[0] = self.bin_idx;
+                    self.transition_state(DecoderState::Sync, Some(SyncState::NetId2));
+                }
+            }
+            SyncState::NetId2 => {
+                assert!(nitems_to_process >= (self.m_number_of_bins + 1) * self.m_os_factor);
+                let net_id_samp_offset = self.m_samples_per_symbol * 5 / 4;
+                let count = (self.m_number_of_bins + 1) * self.m_os_factor;
+                self.net_id_samp[net_id_samp_offset..(net_id_samp_offset + count)]
+                    .copy_from_slice(&input[0..count]);
+                self.net_ids[1] = self.bin_idx;
+                self.transition_state(DecoderState::Sync, Some(SyncState::Downchirp1));
+            }
+            SyncState::Downchirp1 => {
+                let net_id_samp_offset = self.m_samples_per_symbol * 9 / 4;
+                let count = self.m_samples_per_symbol / 4;
+                self.net_id_samp[net_id_samp_offset..(net_id_samp_offset + count)]
+                    .copy_from_slice(&input[0..count]);
+                self.transition_state(DecoderState::Sync, Some(SyncState::Downchirp2));
+            }
+            SyncState::Downchirp2 => {
+                self.down_val = FrameSync::get_symbol_val(&symb_corr, &self.m_upchirp);
+                // info!("self.down_val: {}", self.down_val.unwrap());
+                let count = self.m_samples_per_symbol;
+                self.additional_symbol_samp[0..count].copy_from_slice(&input[0..count]);
+                self.transition_state(DecoderState::Sync, Some(SyncState::QuarterDown));
+            }
+            SyncState::QuarterDown => {
+                (items_to_consume, items_to_output) =
+                    self.sync_quarter_down(sio, input, out, nitems_to_process);
+            }
+            _ => warn!("encountered unexpercted symbol_cnt SyncState."),
+        }
+        (items_to_consume, items_to_output)
+    }
+
+    fn compensate_sfo(
+        &mut self,
+        sio: &mut StreamIo,
+        // input: &[Complex32],
+        out: &mut [Complex32],
+    ) -> (isize, usize) {
+        // transmit only useful symbols (at least 8 symbol for PHY header)
+        if let Ok(Some(frame_info_tag)) = self.tag_from_msg_handler_to_work_channel.1.try_next() {
+            // info!("new frame_info tag: {:?}", frame_info_tag);
+            sio.output(0).add_tag(
+                0,
+                Tag::NamedAny("frame_info".to_string(), Box::new(frame_info_tag)),
+            );
+        }
+
+        if Into::<usize>::into(self.symbol_cnt) < 8
+            || (Into::<usize>::into(self.symbol_cnt) < self.m_symb_numb && self.m_received_head)
+        {
+            // info!("self.symbol_cnt: {}", Into::<usize>::into(self.symbol_cnt));
+            // output downsampled signal (with no STO but with CFO)
+            let count = self.m_number_of_bins;
+            out[0..count].copy_from_slice(&self.in_down[0..count]);
+            let mut items_to_consume = self.m_samples_per_symbol as isize;
+
+            //   update sfo evolution
+            if self.sfo_cum.abs() > 1.0 / 2. / self.m_os_factor as f32 {
+                items_to_consume -= -2 * self.sfo_cum.signum() as isize + 1;
+                self.sfo_cum -= (-2. * self.sfo_cum.signum() + 1.) * 1.0 / self.m_os_factor as f32;
+            }
+            self.sfo_cum += self.sfo_hat;
+            self.increase_symbol_count();
+            (items_to_consume, self.m_number_of_bins)
+        } else if !self.m_received_head {
+            // TODO call again when header decoded message ('frame_info') arrives; done automatically?
+            // Wait for the header to be decoded
+            (0, 0)
+        } else {
+            self.reset();
+            (self.m_samples_per_symbol as isize, 0)
+        }
+    }
+
+    /// stay in the same outer state and inrease the symbol count by one
+    fn increase_symbol_count(&mut self) {
+        self.symbol_cnt = From::<usize>::from(Into::<usize>::into(self.symbol_cnt) + 1_usize);
+    }
+
+    /// enter a new outer state and optionally change the symbol count
+    fn transition_state(
+        &mut self,
+        new_decoder_state: DecoderState,
+        new_sync_state: Option<SyncState>,
+    ) {
+        self.m_state = new_decoder_state;
+        if let Some(sync_state) = new_sync_state {
+            self.symbol_cnt = sync_state;
+        }
+    }
+
+    /// reset STO and CFO estimates and reset state to Detext the next frame
+    fn reset(&mut self) {
+        self.transition_state(DecoderState::Detect, Some(SyncState::NetId2));
+        self.k_hat = 0;
+        self.m_sto_frac = 0.;
+        self.cfo_frac_sto_frac_est = false;
+    }
 }
 
 #[async_trait]
@@ -681,30 +1289,11 @@ impl Kernel for FrameSync {
         _m: &mut MessageIo<Self>,
         _b: &mut BlockMeta,
     ) -> Result<()> {
-        //
-        //         int frame_sync_impl::general_work(int noutput_items,
-        //                                           gr_vector_int &ninput_items,
-        //                                           gr_vector_const_void_star &input_items,
-        //                                           gr_vector_void_star &output_items)
-        //         {
-        //             const gr_complex *in = (const gr_complex *)input_items[0];
-        //             gr_complex *out = (gr_complex *)output_items[0];
-        let mut items_to_output: usize;
-        let mut items_to_consume: isize; //< Number of items to consume after each iteration of the general_work function
-                                         //
         let out = sio.output(0).slice::<Complex32>();
         // check if there is enough space in the output buffer
         if out.len() < self.m_number_of_bins {
             return Ok(());
         }
-
-        let mut sync_log_out: &mut [f32] = &mut [];
-        let m_should_log = if sio.outputs().len() == 2 {
-            sync_log_out = sio.output(1).slice::<f32>();
-            true
-        } else {
-            false
-        };
         let input = sio.input(0).slice::<Complex32>();
         let nitems_to_process = input.len();
 
@@ -760,7 +1349,6 @@ impl Kernel for FrameSync {
             // TODO check, condition taken from self.forecast()
             return Ok(());
         }
-
         // downsampling
         let indexing_offset = (self.m_os_factor as f32 / 2.
             - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32) as f32)
@@ -771,647 +1359,22 @@ impl Kernel for FrameSync {
             .step_by(self.m_os_factor)
             .copied()
             .collect();
-
-        match self.m_state {
+        // outer state machine
+        let (items_to_consume, items_to_output) = match self.m_state {
             DecoderState::Detect => {
                 assert!(nitems_to_process >= self.m_os_factor / 2 + self.m_samples_per_symbol);
-                let bin_idx_new_opt = FrameSync::get_symbol_val(&self.in_down, &self.m_downchirp);
-
-                let condition = if let Some(bin_idx_new) = bin_idx_new_opt {
-                    if ((((bin_idx_new as i32 - self.bin_idx.map(|x| x as i32).unwrap_or(-1))
-                        .abs()
-                        + 1)
-                        % self.m_number_of_bins as i32)
-                        - 1)
-                    .abs()
-                        <= 1
-                    {
-                        if let Some(bin_idx) = self.bin_idx {
-                            if self.symbol_cnt == SyncState::NetId2 {
-                                self.preamb_up_vals[0] = bin_idx;
-                            }
-                        }
-                        self.preamb_up_vals[Into::<usize>::into(self.symbol_cnt)] = bin_idx_new;
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                if condition {
-                    let preamble_raw_idx_offset =
-                        self.m_number_of_bins * Into::<usize>::into(self.symbol_cnt);
-                    let count = self.m_number_of_bins;
-                    self.preamble_raw[preamble_raw_idx_offset..(preamble_raw_idx_offset + count)]
-                        .copy_from_slice(&self.in_down[0..count]);
-                    let preamble_raw_up_idx_offset =
-                        self.m_samples_per_symbol * Into::<usize>::into(self.symbol_cnt);
-                    let count = self.m_samples_per_symbol;
-                    // println!("{}", count);
-                    // println!("{}", preamble_raw_up_idx_offset);
-                    // println!("{}", (self.m_os_factor / 2));
-                    // println!("{}", self.preamble_raw_up.len());
-                    // println!("{}", input.len());
-                    self.preamble_raw_up
-                        [preamble_raw_up_idx_offset..(preamble_raw_up_idx_offset + count)]
-                        .copy_from_slice(
-                            &input[(self.m_os_factor / 2)..(self.m_os_factor / 2 + count)],
-                        );
-
-                    self.symbol_cnt =
-                        From::<usize>::from(Into::<usize>::into(self.symbol_cnt) + 1_usize);
-                    // info!("symbol_cnt: {}", Into::<usize>::into(self.symbol_cnt));
-                } else {
-                    let count = self.m_number_of_bins;
-                    self.preamble_raw[0..count].copy_from_slice(&self.in_down[0..count]);
-                    let count = self.m_samples_per_symbol;
-                    self.preamble_raw_up[0..count].copy_from_slice(
-                        &input[(self.m_os_factor / 2)..(self.m_os_factor / 2 + count)],
-                    );
-
-                    self.symbol_cnt = SyncState::NetId2;
-                }
-                self.bin_idx = bin_idx_new_opt;
-                if self.symbol_cnt == self.m_n_up_req {
-                    info!(
-                        "..:: Frame Detected ({:.1}MHz, SF{})",
-                        self.m_center_freq as f32 / 1.0e6,
-                        self.m_sf
-                    );
-                    // info!(
-                    //     "FrameSync: detected required nuber of upchirps ({})",
-                    //     Into::<usize>::into(self.m_n_up_req)
-                    // );
-                    self.additional_upchirps = 0;
-                    self.m_state = DecoderState::Sync;
-                    self.symbol_cnt = SyncState::NetId1;
-                    self.cfo_frac_sto_frac_est = false;
-                    self.k_hat = most_frequent(&self.preamb_up_vals);
-                    let input_idx_offset = (0.75 * self.m_samples_per_symbol as f32
-                        - self.k_hat as f32 * self.m_os_factor as f32)
-                        as usize;
-                    let count = self.m_samples_per_symbol / 4;
-                    self.net_id_samp[0..count]
-                        .copy_from_slice(&input[input_idx_offset..(input_idx_offset + count)]);
-
-                    // perform the coarse synchronization
-                    items_to_consume = self.m_os_factor as isize
-                        * (self.m_number_of_bins as isize - self.k_hat as isize);
-                } else {
-                    // info!(
-                    //     "FrameSync: did not detect required nuber of upchirps ({}/{})",
-                    //     Into::<usize>::into(self.symbol_cnt),
-                    //     Into::<usize>::into(self.m_n_up_req)
-                    // );
-                    items_to_consume = self.m_samples_per_symbol as isize;
-                }
-                items_to_output = 0;
+                self.detect(input)
             }
-            DecoderState::Sync => {
-                items_to_output = 0;
-                if !self.cfo_frac_sto_frac_est {
-                    // info!(
-                    //     " want {} samples, got {}",
-                    //     self.m_number_of_bins, self.k_hat,
-                    // );
-                    let (preamble_upchirps_tmp, cfo_frac_tmp) = self.estimate_cfo_frac_bernier(
-                        &self.preamble_raw[(self.m_number_of_bins - self.k_hat)..],
-                    );
-                    self.preamble_upchirps = preamble_upchirps_tmp;
-                    self.m_cfo_frac = cfo_frac_tmp;
-                    self.m_sto_frac = self.estimate_sto_frac();
-                    // create correction vector
-                    self.cfo_frac_correc = (0..self.m_number_of_bins)
-                        .map(|x| {
-                            Complex32::from_polar(
-                                1.,
-                                -2. * PI * self.m_cfo_frac as f32 / self.m_number_of_bins as f32
-                                    * x as f32,
-                            )
-                        })
-                        .collect();
-                    self.cfo_frac_sto_frac_est = true;
-                }
-                items_to_consume = self.m_samples_per_symbol as isize;
-                // apply cfo correction
-                let symb_corr = volk_32fc_x2_multiply_32fc(&self.in_down, &self.cfo_frac_correc);
-
-                self.bin_idx = FrameSync::get_symbol_val(&symb_corr, &self.m_downchirp);
-                match self.symbol_cnt {
-                    SyncState::NetId1 => {
-                        // assert!(
-                        //     nitems_to_process
-                        //         >= self.m_os_factor / 2
-                        //             + self.k_hat * self.m_os_factor
-                        //             + self.m_samples_per_symbol
-                        // );
-                        if nitems_to_process
-                            < self.m_os_factor / 2
-                                + self.k_hat * self.m_os_factor
-                                + self.m_samples_per_symbol
-                        {
-                            // warn!(
-                            //     "FrameSync: not enough samples in input buffer, waiting for more."
-                            // );
-                            return Ok(());
-                        }
-                        if self.bin_idx.is_some()
-                            && (self.bin_idx.unwrap() == 0
-                                || self.bin_idx.unwrap() == 1
-                                || self.bin_idx.unwrap() == self.m_number_of_bins - 1)
-                        {
-                            // look for additional upchirps. Won't work if network identifier 1 equals 2^sf-1, 0 or 1!
-                            let input_offset = (0.75 * self.m_samples_per_symbol as f32) as usize;
-                            let count = self.m_samples_per_symbol / 4;
-                            self.net_id_samp[0..count]
-                                .copy_from_slice(&input[input_offset..(input_offset + count)]);
-                            if self.additional_upchirps >= 3 {
-                                self.preamble_raw_up.rotate_left(self.m_samples_per_symbol);
-                                let preamble_raw_up_offset = self.m_samples_per_symbol
-                                    * (Into::<usize>::into(self.m_n_up_req) + 3);
-                                let input_offset =
-                                    self.m_os_factor / 2 + self.k_hat * self.m_os_factor;
-                                let count = self.m_samples_per_symbol;
-                                self.preamble_raw_up
-                                    [preamble_raw_up_offset..(preamble_raw_up_offset + count)]
-                                    .copy_from_slice(&input[input_offset..(input_offset + count)]);
-                            } else {
-                                let preamble_raw_up_offset = self.m_samples_per_symbol
-                                    * (Into::<usize>::into(self.m_n_up_req)
-                                        + self.additional_upchirps);
-                                let input_offset =
-                                    self.m_os_factor / 2 + self.k_hat * self.m_os_factor;
-                                let count = self.m_samples_per_symbol;
-                                self.preamble_raw_up
-                                    [preamble_raw_up_offset..(preamble_raw_up_offset + count)]
-                                    .copy_from_slice(&input[input_offset..(input_offset + count)]);
-                                self.additional_upchirps += 1;
-                            }
-                        } else {
-                            // network identifier 1 correct or off by one
-                            self.symbol_cnt = SyncState::NetId2;
-                            let net_id_samp_offset = self.m_samples_per_symbol / 4;
-                            let count = self.m_samples_per_symbol;
-                            self.net_id_samp[net_id_samp_offset..(net_id_samp_offset + count)]
-                                .copy_from_slice(&input[0..count]);
-                            self.net_ids[0] = self.bin_idx;
-                        }
-                    }
-                    SyncState::NetId2 => {
-                        assert!(
-                            nitems_to_process >= (self.m_number_of_bins + 1) * self.m_os_factor
-                        );
-                        self.symbol_cnt = SyncState::Downchirp1;
-                        let net_id_samp_offset = self.m_samples_per_symbol * 5 / 4;
-                        let count = (self.m_number_of_bins + 1) * self.m_os_factor;
-                        self.net_id_samp[net_id_samp_offset..(net_id_samp_offset + count)]
-                            .copy_from_slice(&input[0..count]);
-                        self.net_ids[1] = self.bin_idx;
-                    }
-                    SyncState::Downchirp1 => {
-                        let net_id_samp_offset = self.m_samples_per_symbol * 9 / 4;
-                        let count = self.m_samples_per_symbol / 4;
-                        self.net_id_samp[net_id_samp_offset..(net_id_samp_offset + count)]
-                            .copy_from_slice(&input[0..count]);
-                        self.symbol_cnt = SyncState::Downchirp2;
-                    }
-                    SyncState::Downchirp2 => {
-                        self.down_val = FrameSync::get_symbol_val(&symb_corr, &self.m_upchirp);
-                        // info!("self.down_val: {}", self.down_val.unwrap());
-                        let count = self.m_samples_per_symbol;
-                        self.additional_symbol_samp[0..count].copy_from_slice(&input[0..count]);
-                        self.symbol_cnt = SyncState::QuarterDown;
-                    }
-                    SyncState::QuarterDown => {
-                        let count = self.m_samples_per_symbol;
-                        self.additional_symbol_samp
-                            [self.m_samples_per_symbol..(self.m_samples_per_symbol + count)]
-                            .copy_from_slice(&input[0..count]);
-                        let m_cfo_int = if let Some(down_val) = self.down_val {
-                            // info!("down_val: {}", down_val);
-                            if down_val < self.m_number_of_bins / 2 {
-                                down_val as isize / 2
-                            } else {
-                                (down_val as isize - self.m_number_of_bins as isize) / 2
-                            }
-                        } else {
-                            panic!("self.down_val must not be None here.")
-                        };
-                        // info!("m_cfo_int: {}", m_cfo_int);
-                        let cfo_int_modulo = my_modulo(m_cfo_int, self.m_number_of_bins);
-                        // info!(
-                        //     "(m_cfo_int % self.m_number_of_bins as isize): {}",
-                        //     cfo_int_modulo
-                        // );
-
-                        // correct STOint and CFOint in the preamble upchirps
-                        self.preamble_upchirps.rotate_left(cfo_int_modulo);
-
-                        let cfo_int_correc: Vec<Complex32> = (0_usize
-                            ..((Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps)
-                                * self.m_number_of_bins))
-                            .map(|x| {
-                                Complex32::from_polar(
-                                    1.,
-                                    -2. * PI * m_cfo_int as f32 / self.m_number_of_bins as f32
-                                        * x as f32,
-                                )
-                            })
-                            .collect();
-
-                        self.preamble_upchirps =
-                            volk_32fc_x2_multiply_32fc(&self.preamble_upchirps, &cfo_int_correc); // count: up_symb_to_use * m_number_of_bins
-
-                        // correct SFO in the preamble upchirps
-
-                        self.sfo_hat = (m_cfo_int as f32 + self.m_cfo_frac as f32)
-                            * self.m_bw as f32
-                            / self.m_center_freq as f32;
-                        let clk_off = self.sfo_hat / self.m_number_of_bins as f32;
-                        let fs = self.m_bw as f32;
-                        let fs_p = fs * (1. - clk_off);
-                        let n = self.m_number_of_bins;
-                        let sfo_corr_vect: Vec<Complex32> =
-                            (0..((Into::<usize>::into(self.m_n_up_req)
-                                + self.additional_upchirps)
-                                * self.m_number_of_bins))
-                                .map(|x| {
-                                    Complex32::from_polar(
-                                        1.,
-                                        -2. * PI * ((x % n) * (x % n)) as f32 / 2. / n as f32
-                                            * (fs / fs_p * fs / fs_p - 1.)
-                                            + ((x / n) as f32
-                                                * (fs / fs_p * fs / fs_p - fs / fs_p)
-                                                + fs / 2. * (1. / fs - 1. / fs_p))
-                                                * (x % n) as f32,
-                                    )
-                                })
-                                .collect();
-
-                        let count = self.up_symb_to_use * self.m_number_of_bins;
-                        let tmp = volk_32fc_x2_multiply_32fc(
-                            &self.preamble_upchirps[0..count],
-                            &sfo_corr_vect[0..count],
-                        );
-                        self.preamble_upchirps[0..count].copy_from_slice(&tmp);
-
-                        let tmp_sto_frac = self.estimate_sto_frac(); // better estimation of sto_frac in the beginning of the upchirps
-                        let diff_sto_frac = self.m_sto_frac - tmp_sto_frac;
-
-                        if diff_sto_frac.abs()
-                            <= (self.m_os_factor - 1) as f32 / self.m_os_factor as f32
-                        {
-                            // avoid introducing off-by-one errors by estimating fine_sto=-0.499 , rough_sto=0.499
-                            self.m_sto_frac = tmp_sto_frac;
-                        }
-
-                        // get SNR estimate from preamble
-                        // downsample preab_raw
-                        // apply sto correction
-                        let preamble_raw_up_offset = self.m_os_factor
-                            * (self.m_number_of_bins - self.k_hat)
-                            - FrameSync::my_roundf(self.m_os_factor as f32 * self.m_sto_frac)
-                                as usize;
-                        let count = (Into::<usize>::into(self.m_n_up_req)
-                            + self.additional_upchirps)
-                            * self.m_number_of_bins;
-                        let mut corr_preamb: Vec<Complex32> = self.preamble_raw_up
-                            [preamble_raw_up_offset
-                                ..(preamble_raw_up_offset + self.m_os_factor * count)]
-                            .iter()
-                            .step_by(self.m_os_factor)
-                            .copied()
-                            .collect();
-                        corr_preamb.rotate_left(cfo_int_modulo);
-                        // apply cfo correction
-                        corr_preamb = volk_32fc_x2_multiply_32fc(&corr_preamb, &cfo_int_correc);
-                        for i in
-                            0..(Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps)
-                        {
-                            let offset = self.m_number_of_bins * i;
-                            let end_range = self.m_number_of_bins * (i + 1);
-                            let tmp = volk_32fc_x2_multiply_32fc(
-                                &corr_preamb[offset..end_range],
-                                &self.cfo_frac_correc[0..self.m_number_of_bins],
-                            );
-                            corr_preamb[offset..end_range].copy_from_slice(&tmp);
-                        }
-
-                        // //apply sfo correction
-                        corr_preamb = volk_32fc_x2_multiply_32fc(&corr_preamb, &sfo_corr_vect);
-
-                        let mut snr_est = 0.0_f32;
-                        for i in 0..self.up_symb_to_use {
-                            snr_est += self.determine_snr(
-                                &corr_preamb[(i * self.m_number_of_bins)
-                                    ..((i + 1) * self.m_number_of_bins)],
-                            );
-                        }
-                        snr_est /= self.up_symb_to_use as f32;
-
-                        // update sto_frac to its value at the beginning of the net id
-                        self.m_sto_frac += self.sfo_hat * self.m_preamb_len as f32;
-                        // ensure that m_sto_frac is in [-0.5,0.5]
-                        if self.m_sto_frac.abs() > 0.5 {
-                            self.m_sto_frac += if self.m_sto_frac > 0. { -1. } else { 1. };
-                        }
-                        // decim net id according to new sto_frac and sto int
-                        // start_off gives the offset in the net_id_samp vector required to be aligned in time (CFOint is equivalent to STOint since upchirp_val was forced to 0)
-                        let start_off = (self.m_os_factor as isize / 2
-                            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
-                            + self.m_os_factor as isize
-                                * (self.m_number_of_bins as isize / 4 + m_cfo_int))
-                            as usize;
-                        // info!("self.m_os_factor / 2: {}", self.m_os_factor / 2);
-                        // info!(
-                        //     "FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32): {}",
-                        //     FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
-                        // );
-                        // info!(
-                        //     "self.m_os_factor * (self.m_number_of_bins / 4 + m_cfo_int): {}",
-                        //     self.m_os_factor as isize
-                        //         * (self.m_number_of_bins as isize / 4 + m_cfo_int)
-                        // );
-                        // info!("self.m_number_of_bins: {}", self.m_number_of_bins);
-                        // info!("self.m_sto_frac: {}", self.m_sto_frac);
-                        // info!("m_cfo_int: {}", m_cfo_int);
-                        // info!("start_offset: {}", start_off);
-                        let count = 2 * self.m_number_of_bins;
-                        let mut net_ids_samp_dec: Vec<Complex32> = self.net_id_samp
-                            [start_off..(start_off + count * self.m_os_factor)]
-                            .iter()
-                            .step_by(self.m_os_factor)
-                            .copied()
-                            .collect();
-                        net_ids_samp_dec =
-                            volk_32fc_x2_multiply_32fc(&net_ids_samp_dec, &cfo_int_correc);
-
-                        // correct CFO_frac in the network ids
-                        let tmp = volk_32fc_x2_multiply_32fc(
-                            &net_ids_samp_dec[0..self.m_number_of_bins],
-                            &self.cfo_frac_correc,
-                        );
-                        net_ids_samp_dec[0..self.m_number_of_bins].copy_from_slice(&tmp);
-                        let tmp = volk_32fc_x2_multiply_32fc(
-                            &net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)],
-                            &self.cfo_frac_correc,
-                        );
-                        net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)]
-                            .copy_from_slice(&tmp);
-
-                        let netid1 = FrameSync::get_symbol_val(
-                            &net_ids_samp_dec[0..self.m_number_of_bins],
-                            &self.m_downchirp,
-                        )
-                        .unwrap();
-                        let netid2 = FrameSync::get_symbol_val(
-                            &net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)],
-                            &self.m_downchirp,
-                        )
-                        .unwrap();
-                        let mut one_symbol_off = false;
-                        let mut off_by_one_id = false;
-
-                        info!("netid1: {} (soll {})", netid1, self.m_sync_words[0]);
-                        info!("netid2: {} (soll {})", netid2, self.m_sync_words[1]);
-
-                        if (netid1 as i32 - self.m_sync_words[0] as i32).abs() > 2
-                        // wrong id 1, (we allow an offset of 2)
-                        {
-                            // check if we are in fact checking the second net ID and that the first one was considered as a preamble upchirp
-                            if (netid1 as i32 - self.m_sync_words[1] as i32).abs() <= 2 {
-                                let net_id_off = netid1 as isize - self.m_sync_words[1] as isize;
-                                for i in (self.m_preamb_len - 2)
-                                    ..(Into::<usize>::into(self.m_n_up_req)
-                                        + self.additional_upchirps)
-                                {
-                                    if FrameSync::get_symbol_val(
-                                        &corr_preamb[(i * self.m_number_of_bins)
-                                            ..((i + 1) * self.m_number_of_bins)],
-                                        &self.m_downchirp,
-                                    )
-                                    .unwrap() as isize
-                                        + net_id_off
-                                        == self.m_sync_words[0] as isize
-                                    // found the first netID
-                                    {
-                                        one_symbol_off = true;
-                                        if net_id_off != 0 && net_id_off.abs() > 1 {
-                                            warn!(
-                                                "[frame_sync.rs] net id offset >1: {}",
-                                                net_id_off
-                                            );
-                                        }
-                                        if m_should_log {
-                                            off_by_one_id = net_id_off != 0;
-                                        }
-                                        items_to_consume =
-                                            -(self.m_os_factor as isize) * net_id_off;
-                                        // the first symbol was mistaken for the end of the downchirp. we should correct and output it.
-
-                                        let start_off = self.m_os_factor as isize / 2
-                                            - FrameSync::my_roundf(
-                                                self.m_sto_frac * self.m_os_factor as f32,
-                                            )
-                                            + self.m_os_factor as isize
-                                                * (self.m_number_of_bins as isize / 4 + m_cfo_int);
-                                        for i in (start_off
-                                            ..(self.m_samples_per_symbol as isize * 5 / 4))
-                                            .step_by(self.m_os_factor)
-                                        {
-                                            assert!((i - start_off) > 0);
-                                            assert!(i > 0);
-                                            out[(i - start_off) as usize / self.m_os_factor] =
-                                                self.additional_symbol_samp[i as usize];
-                                        }
-                                        items_to_output = self.m_number_of_bins;
-                                        self.m_state = DecoderState::SfoCompensation;
-                                        self.symbol_cnt = SyncState::NetId2;
-                                        self.frame_cnt += 1;
-                                    }
-                                }
-                                if !one_symbol_off {
-                                    self.m_state = DecoderState::Detect;
-                                    self.symbol_cnt = SyncState::NetId2;
-                                    items_to_output = 0;
-                                    self.k_hat = 0;
-                                    self.m_sto_frac = 0.;
-                                    // items_to_consume = 0;
-                                }
-                            } else {
-                                self.m_state = DecoderState::Detect;
-                                self.symbol_cnt = SyncState::NetId2;
-                                items_to_output = 0;
-                                self.k_hat = 0;
-                                self.m_sto_frac = 0.;
-                                // items_to_consume = 0;
-                            }
-                        } else {
-                            // net ID 1 valid
-                            let net_id_off = netid1 as isize - self.m_sync_words[0] as isize;
-                            if ((netid2 as isize - net_id_off) % self.m_number_of_bins as isize)
-                                as usize
-                                != self.m_sync_words[1]
-                            // wrong id 2
-                            {
-                                self.m_state = DecoderState::Detect;
-                                self.symbol_cnt = SyncState::NetId2;
-                                items_to_output = 0;
-                                self.k_hat = 0;
-                                self.m_sto_frac = 0.;
-                                // items_to_consume = 0;
-                            } else {
-                                if net_id_off != 0 && net_id_off.abs() > 1 {
-                                    warn!("[frame_sync.rs] net id offset >1: {}", net_id_off);
-                                }
-                                if m_should_log {
-                                    off_by_one_id = net_id_off != 0;
-                                }
-                                items_to_consume = -(self.m_os_factor as isize) * net_id_off;
-                                self.m_state = DecoderState::SfoCompensation;
-                                self.frame_cnt += 1;
-                            }
-                        }
-                        if self.m_state != DecoderState::Detect {
-                            self.m_received_head = false;
-                            items_to_consume += self.m_samples_per_symbol as isize / 4
-                                + self.m_os_factor as isize * m_cfo_int;
-                            if items_to_consume <= nitems_to_process as isize {
-                                // update sto_frac to its value at the payload beginning
-                                self.m_sto_frac += self.sfo_hat * 4.25;
-                                self.sfo_cum = ((self.m_sto_frac * self.m_os_factor as f32)
-                                    - FrameSync::my_roundf(
-                                        self.m_sto_frac * self.m_os_factor as f32,
-                                    ) as f32)
-                                    / self.m_os_factor as f32;
-
-                                let mut frame_info: HashMap<String, Pmt> = HashMap::new();
-
-                                frame_info.insert(String::from("is_header"), Pmt::Bool(true));
-                                frame_info
-                                    .insert(String::from("cfo_int"), Pmt::F32(m_cfo_int as f32));
-                                frame_info
-                                    .insert(String::from("cfo_frac"), Pmt::F64(self.m_cfo_frac));
-                                frame_info.insert(String::from("sf"), Pmt::Usize(self.m_sf));
-                                let frame_info_pmt = Pmt::MapStrPmt(frame_info);
-
-                                sio.output(0).add_tag(
-                                    0,
-                                    Tag::NamedAny(
-                                        "frame_info".to_string(),
-                                        Box::new(frame_info_pmt),
-                                    ),
-                                );
-                                self.symbol_cnt = if one_symbol_off {
-                                    SyncState::NetId2
-                                } else {
-                                    SyncState::NetId1
-                                };
-                                // let mut snr_est2: f32 = 0.;  // TODO unused
-
-                                if m_should_log {
-                                    // estimate SNR
-
-                                    // for i in 0..self.up_symb_to_use {
-                                    //     snr_est2 += self.determine_snr(
-                                    //         &self.preamble_upchirps[(i * self.m_number_of_bins)
-                                    //             ..((i + 1) * self.m_number_of_bins)],
-                                    //     );
-                                    // }
-                                    // snr_est2 /= self.up_symb_to_use as f32;
-                                    let cfo_log = m_cfo_int as f32 + self.m_cfo_frac as f32;
-                                    let sto_log =
-                                        (self.k_hat as isize - m_cfo_int) as f32 + self.m_sto_frac;
-                                    let srn_log = snr_est;
-                                    let sfo_log = self.sfo_hat;
-
-                                    sync_log_out[0] = srn_log;
-                                    sync_log_out[1] = cfo_log;
-                                    sync_log_out[2] = sto_log;
-                                    sync_log_out[3] = sfo_log;
-                                    sync_log_out[4] = if off_by_one_id { 1. } else { 0. };
-                                    sio.output(1).produce(5);
-                                }
-                                // #ifdef PRINT_INFO
-                                //
-                                //                         std::cout << "[frame_sync_impl.cc] " << frame_cnt << " CFO estimate: " << m_cfo_int + m_cfo_frac << ", STO estimate: " << k_hat - m_cfo_int + m_sto_frac << " snr est: " << snr_est << std::endl;
-                                // #endif
-                            } else {
-                                self.m_state = DecoderState::Detect;
-                                self.symbol_cnt = SyncState::NetId2;
-                                items_to_output = 0;
-                                self.k_hat = 0;
-                                self.m_sto_frac = 0.;
-                                items_to_consume = 0;
-                            }
-                        }
-                    }
-                    _ => warn!("encountered unexpercted symbol_cnt SyncState."),
-                }
-            }
-            DecoderState::SfoCompensation => {
-                // info!("FLAAAAAAAAAG 6!");
-                // transmit only useful symbols (at least 8 symbol for PHY header)
-
-                if let Ok(Some(frame_info_tag)) =
-                    self.tag_from_msg_handler_to_work_channel.1.try_next()
-                {
-                    // info!("new frame_info tag: {:?}", frame_info_tag);
-                    sio.output(0).add_tag(
-                        0,
-                        Tag::NamedAny("frame_info".to_string(), Box::new(frame_info_tag)),
-                    );
-                }
-
-                if Into::<usize>::into(self.symbol_cnt) < 8
-                    || (Into::<usize>::into(self.symbol_cnt) < self.m_symb_numb
-                        && self.m_received_head)
-                {
-                    // info!("self.symbol_cnt: {}", Into::<usize>::into(self.symbol_cnt));
-                    // output downsampled signal (with no STO but with CFO)
-                    let count = self.m_number_of_bins;
-                    out[0..count].copy_from_slice(&self.in_down[0..count]);
-                    items_to_consume = self.m_samples_per_symbol as isize;
-
-                    //   update sfo evolution
-                    if self.sfo_cum.abs() > 1.0 / 2. / self.m_os_factor as f32 {
-                        items_to_consume -= -2 * self.sfo_cum.signum() as isize + 1;
-                        self.sfo_cum -=
-                            (-2. * self.sfo_cum.signum() + 1.) * 1.0 / self.m_os_factor as f32;
-                    }
-
-                    self.sfo_cum += self.sfo_hat;
-
-                    items_to_output = self.m_number_of_bins;
-                    self.symbol_cnt = From::<usize>::from(Into::<usize>::into(self.symbol_cnt) + 1);
-                } else if !self.m_received_head {
-                    // Wait for the header to be decoded
-                    items_to_consume = 0;
-                    items_to_output = 0;
-                    // TODO call again when header decoded message ('frame_info') arrives; done automatically?
-                } else {
-                    self.m_state = DecoderState::Detect;
-                    self.symbol_cnt = SyncState::NetId2;
-                    items_to_consume = self.m_samples_per_symbol as isize;
-                    items_to_output = 0;
-                    self.k_hat = 0;
-                    self.m_sto_frac = 0.;
-                }
-            } // _ => {
-              //     panic!("[LoRa sync] WARNING : No state! Shouldn't happen\n");
-              // }
+            DecoderState::Sync => self.sync(sio, input, out, nitems_to_process),
+            DecoderState::SfoCompensation => self.compensate_sfo(sio, out),
+        };
+        assert!(nitems_to_process >= items_to_consume as usize, "tried to consume {items_to_consume} samples, but input buffer only holds {nitems_to_process}.");
+        if items_to_consume > 0 {
+            sio.input(0).consume(items_to_consume as usize);
         }
-        // if items_to_consume == 0 {
-        //     warn!("FrameSync: not enough samples in input buffer, waiting for more.")
-        // }
-        // info!("FrameSync: consuing {} samples, producing {}", items_to_consume, items_to_output);
-        assert!(nitems_to_process >= items_to_consume as usize, "tried to consume {items_to_consume} semples, but input holds only {nitems_to_process}.");
-        sio.input(0).consume(items_to_consume as usize);
-        // if items_to_output > 0 {
-        //     info!("FrameSync: producing {} samples", items_to_output);
-        // }
-        sio.output(0).produce(items_to_output);
+        if items_to_output > 0 {
+            sio.output(0).produce(items_to_output);
+        }
         Ok(())
     }
 }

@@ -121,6 +121,7 @@ impl Decoder {
 
                     let data = String::from_utf8_lossy(&dewhitened);
                     info!("received frame: {}", data);
+                    info!("received frame [bin]: {:?}", &dewhitened);
                     mio.output_mut(0).post(Pmt::Blob(dewhitened)).await;
 
                     Pmt::Ok
