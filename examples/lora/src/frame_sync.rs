@@ -120,8 +120,7 @@ pub struct FrameSync {
     // downchirp_raw: Vec<Complex32>,    //< vetor containing the preamble downchirps without any synchronization
     preamble_upchirps: Vec<Complex32>, //<vector containing the preamble upchirps
     net_id_samp: Vec<Complex32>,       //< vector of the oversampled network identifier samples
-    net_ids: Vec<Option<usize>>,       //< values of the network identifiers received
-
+    // net_ids: Vec<Option<usize>>,       //< values of the network identifiers received
     up_symb_to_use: usize, //< number of upchirp symbols to use for CFO and STO frac estimation
     k_hat: usize,          //< integer part of CFO+STO
     preamb_up_vals: Vec<usize>, //< value of the preamble upchirps
@@ -141,6 +140,10 @@ pub struct FrameSync {
     // m_should_log: bool, //< indicate that the sync values should be logged
     // off_by_one_id: f32, //< Indicate that the network identifiers where off by one and corrected (float used as saved in a float32 bin file)
     tag_from_msg_handler_to_work_channel: (mpsc::Sender<Pmt>, mpsc::Receiver<Pmt>),
+    known_valid_net_ids: [Option<u8>; 256],
+    known_valid_net_ids_reverse: [Option<u8>; 256],
+    net_id: [u8; 2],
+    ready_to_detect: bool,
 }
 
 impl FrameSync {
@@ -177,6 +180,7 @@ impl FrameSync {
                 .build(),
             MessageIoBuilder::new()
                 .add_input("frame_info", Self::frame_info_handler)
+                .add_input("payload_crc_result", Self::payload_crc_result_handler)
                 // .add_input("noise_est", Self::noise_est_handler)
                 .add_output("snr")
                 .build(),
@@ -190,8 +194,7 @@ impl FrameSync {
                 m_os_factor: os_factor,      //< oversampling factor
 
                 m_preamb_len: preamble_len_tmp, //< Number of consecutive upchirps in preamble
-                net_ids: vec![None; 2],         //< values of the network identifiers received
-
+                // net_ids: vec![None; 2],         //< values of the network identifiers received
                 m_n_up_req: From::<usize>::from(preamble_len_tmp - 3), //< number of consecutive upchirps required to trigger a detection
                 up_symb_to_use: preamble_len_tmp - 4, //< number of upchirp symbols to use for CFO and STO frac estimation
 
@@ -258,6 +261,10 @@ impl FrameSync {
                 // m_should_log: false, //< indicate that the sync values should be logged
                 // off_by_one_id: f32  // local to work
                 tag_from_msg_handler_to_work_channel: mpsc::channel::<Pmt>(1),
+                known_valid_net_ids: [None; 256],
+                known_valid_net_ids_reverse: [None; 256],
+                net_id: [0; 2],
+                ready_to_detect: true,
             },
         )
     }
@@ -541,6 +548,36 @@ impl FrameSync {
     // }
 
     #[message_handler]
+    fn payload_crc_result_handler(
+        &mut self,
+        _io: &mut WorkIo,
+        _mio: &mut MessageIo<Self>,
+        _meta: &mut BlockMeta,
+        p: Pmt,
+    ) -> Result<Pmt> {
+        if let Pmt::Bool(crc_valid) = p {
+            // payload decoded successfully, cache current net_ids for future frame corrections
+            if crc_valid && self.known_valid_net_ids[self.net_id[0] as usize].is_none() {
+                info!(
+                    "payload decoded successfully, caching new net id: [{}, {}]",
+                    self.net_id[0], self.net_id[1]
+                );
+                self.known_valid_net_ids[self.net_id[0] as usize] = Some(self.net_id[1]); // TODO
+                self.known_valid_net_ids_reverse[self.net_id[1] as usize] = Some(self.net_id[0]);
+            } else if !crc_valid {
+                info!(
+                    "failed to decode payload for netid [{}, {}], dropping.",
+                    self.net_id[0], self.net_id[1]
+                );
+            }
+            self.ready_to_detect = true;
+        } else {
+            warn!("payload_crc_result pmt was not a Bool");
+        }
+        Ok(Pmt::Null)
+    }
+
+    #[message_handler]
     fn frame_info_handler(
         &mut self,
         _io: &mut WorkIo,
@@ -586,6 +623,10 @@ impl FrameSync {
             if m_invalid_header {
                 self.reset()
             } else {
+                if m_has_crc {
+                    // TODO blocking until crc result is in to avoid interleaving caching decision with next frame (with new unchecked net ids)
+                    self.ready_to_detect = false;
+                }
                 let m_ldro: LdroMode = if ldro_mode_tmp == LdroMode::AUTO {
                     if (1_usize << self.m_sf) as f32 * 1e3 / self.m_bw as f32 > LDRO_MAX_DURATION_MS
                     {
@@ -925,43 +966,92 @@ impl FrameSync {
         );
         net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)].copy_from_slice(&tmp);
 
-        let netid1 = FrameSync::get_symbol_val(
+        self.net_id[0] = FrameSync::get_symbol_val(
             &net_ids_samp_dec[0..self.m_number_of_bins],
             &self.m_downchirp,
         )
-        .unwrap();
-        let netid2 = FrameSync::get_symbol_val(
+        .unwrap()
+        .try_into()
+        .expect("detected net-id was greater than 255.");
+        self.net_id[1] = FrameSync::get_symbol_val(
             &net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)],
             &self.m_downchirp,
         )
-        .unwrap();
+        .unwrap()
+        .try_into()
+        .expect("detected net-id was greater than 255.");
         let mut one_symbol_off = false;
         let mut off_by_one_id = false;
 
-        info!("netid1: {} (soll {})", netid1, self.m_sync_words[0]);
-        info!("netid2: {} (soll {})", netid2, self.m_sync_words[1]);
+        // info!("netid1: {} (soll {})", self.net_id[0], self.m_sync_words[0]);
+        // info!("netid2: {} (soll {})", self.net_id[1], self.m_sync_words[1]);
 
-        if false
+        info!("netid1: {}", self.net_id[0]);
+        info!("netid2: {}", self.net_id[1]);
+        let mut sync_word_tmp: Option<[u8; 2]> = None;
+        for i in (self.net_id[0] - 2)..(self.net_id[0] + 2) {
+            if let Some(id_2) = self.known_valid_net_ids[i as usize] {
+                sync_word_tmp = Some([i, id_2]);
+                break;
+            }
+        }
+        if let Some(sync_word) = sync_word_tmp
         // TODO
         // if (netid1 as i32 - self.m_sync_words[0] as i32).abs() > 2
         // wrong id 1, (we allow an offset of 2)
         {
+            info!("netid1: {} (soll {})", self.net_id[0], sync_word[0]);
+            info!("netid2: {} (soll {})", self.net_id[1], sync_word[1]);
+            // net ID 1 valid
+            let net_id_off = self.net_id[0] as isize - sync_word[0] as isize;
+            if ((self.net_id[1] as isize - net_id_off) % self.m_number_of_bins as isize) as usize
+                != sync_word[1] as usize
+            // wrong id 2
+            {
+                self.reset();
+                return (items_to_consume, 0);
+                // items_to_consume = 0;
+            } else {
+                if net_id_off != 0 && net_id_off.abs() > 1 {
+                    warn!("[frame_sync.rs] net id offset >1: {}", net_id_off);
+                }
+                if m_should_log {
+                    off_by_one_id = net_id_off != 0;
+                }
+                self.net_id[0] = sync_word[0];
+                self.net_id[1] = sync_word[1];
+                items_to_consume = -(self.m_os_factor as isize) * net_id_off;
+                self.frame_cnt += 1;
+            }
+        } else {
             // check if we are in fact checking the second net ID and that the first one was considered as a preamble upchirp
-            if (netid1 as i32 - self.m_sync_words[1] as i32).abs() <= 2 {
-                let net_id_off = netid1 as isize - self.m_sync_words[1] as isize;
+            let mut sync_word_tmp: Option<[u8; 2]> = None;
+            for i in (self.net_id[0] - 2)..(self.net_id[0] + 2) {
+                if let Some(id_1) = self.known_valid_net_ids_reverse[i as usize] {
+                    sync_word_tmp = Some([id_1, i]);
+                    break;
+                }
+            }
+            if let Some(sync_word) = sync_word_tmp {
+                let net_id_off = self.net_id[0] as isize - sync_word[1] as isize;
                 for i in (self.m_preamb_len - 2)
                     ..(Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps)
                 {
-                    if FrameSync::get_symbol_val(
+                    let net_id_1_tmp = FrameSync::get_symbol_val(
                         &corr_preamb
                             [(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)],
                         &self.m_downchirp,
                     )
-                    .unwrap() as isize
-                        + net_id_off
-                        == self.m_sync_words[0] as isize
+                    .unwrap();
+                    if net_id_1_tmp as isize + net_id_off == sync_word[0] as isize
                     // found the first netID
                     {
+                        info!("detected netid2 as netid1, recovering..");
+                        info!("netid1: {} (soll {})", self.net_id[0], sync_word[0]);
+                        info!("netid2: {} (soll {})", self.net_id[1], sync_word[1]);
+                        // register swap to avoid caching wrong net_ids later
+                        self.net_id[0] = sync_word[0];
+                        self.net_id[1] = sync_word[1];
                         one_symbol_off = true;
                         if net_id_off != 0 && net_id_off.abs() > 1 {
                             warn!("[frame_sync.rs] net id offset >1: {}", net_id_off);
@@ -989,38 +1079,18 @@ impl FrameSync {
                     }
                 }
                 if !one_symbol_off {
-                    self.reset();
-                    return (items_to_consume, 0);
-                    // items_to_consume = 0;
+                    info!(
+                        "encountered new net id: [{}, {}], trying to decode header...",
+                        self.net_id[0], self.net_id[1]
+                    );
+                    items_to_consume = 0;
+                    self.frame_cnt += 1;
                 }
             } else {
-                self.reset();
-                return (items_to_consume, 0);
-                // items_to_consume = 0;
-            }
-        } else {
-            // net ID 1 valid
-            let net_id_off = netid1 as isize - self.m_sync_words[0] as isize;
-            if false
-            // TODO
-            // if ((netid2 as isize - net_id_off) % self.m_number_of_bins as isize)
-            //     as usize
-            //     != self.m_sync_words[1]
-            // wrong id 2
-            {
-                self.reset();
-                return (items_to_consume, 0);
-                // items_to_consume = 0;
-            } else {
-                // TODO reactivate
-                // if net_id_off != 0 && net_id_off.abs() > 1 {
-                //     warn!("[frame_sync.rs] net id offset >1: {}", net_id_off);
-                // }
-                // if m_should_log {
-                //     off_by_one_id = net_id_off != 0;
-                // }
-                // items_to_consume = -(self.m_os_factor as isize) * net_id_off;
-                // TODO
+                info!(
+                    "encountered new net id: [{}, {}], trying to decode header...",
+                    self.net_id[0], self.net_id[1]
+                );
                 items_to_consume = 0;
                 self.frame_cnt += 1;
             }
@@ -1176,7 +1246,7 @@ impl FrameSync {
                     let count = self.m_samples_per_symbol;
                     self.net_id_samp[net_id_samp_offset..(net_id_samp_offset + count)]
                         .copy_from_slice(&input[0..count]);
-                    self.net_ids[0] = self.bin_idx;
+                    // self.net_ids[0] = self.bin_idx;
                     self.transition_state(DecoderState::Sync, Some(SyncState::NetId2));
                 }
             }
@@ -1186,7 +1256,7 @@ impl FrameSync {
                 let count = (self.m_number_of_bins + 1) * self.m_os_factor;
                 self.net_id_samp[net_id_samp_offset..(net_id_samp_offset + count)]
                     .copy_from_slice(&input[0..count]);
-                self.net_ids[1] = self.bin_idx;
+                // self.net_ids[1] = self.bin_idx;
                 self.transition_state(DecoderState::Sync, Some(SyncState::Downchirp1));
             }
             SyncState::Downchirp1 => {
@@ -1362,6 +1432,10 @@ impl Kernel for FrameSync {
         // outer state machine
         let (items_to_consume, items_to_output) = match self.m_state {
             DecoderState::Detect => {
+                if !self.ready_to_detect {
+                    _io.call_again = true; // TODO
+                    return Ok(());
+                }
                 assert!(nitems_to_process >= self.m_os_factor / 2 + self.m_samples_per_symbol);
                 self.detect(input)
             }

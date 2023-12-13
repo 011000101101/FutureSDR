@@ -26,6 +26,7 @@ impl Decoder {
                 .add_input("in", Self::handler)
                 .add_output("data")
                 .add_output("rftap")
+                .add_output("crc_check")
                 .build(),
             Decoder,
         )
@@ -92,6 +93,7 @@ impl Decoder {
                         let crc_valid: bool =
                             ((dewhitened[l - 2] as u16) + ((dewhitened[l - 1] as u16) << 8)) as i32
                                 == crc as i32;
+                        mio.output_mut(2).post(Pmt::Bool(crc_valid)).await;
                         if !crc_valid {
                             info!("crc check failed");
                             return Ok(Pmt::Ok);

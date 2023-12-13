@@ -219,6 +219,7 @@ fn main() -> Result<()> {
             fg.connect_message(header_decoder, "out", decoder, "in")?;
             fg.connect_message(decoder, "data", udp_data, "in")?;
             fg.connect_message(decoder, "rftap", udp_rftap, "in")?;
+            fg.connect_message(decoder, "crc_check", frame_sync, "payload_crc_result")?;
 
             fg.connect_message(header_decoder, "frame_info", frame_sync, "frame_info")?;
         }
