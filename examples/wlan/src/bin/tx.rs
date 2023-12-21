@@ -10,6 +10,7 @@ use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
+use futuresdr::seify::Device;
 
 use wlan::fft_tag_propagation;
 use wlan::parse_channel;
@@ -25,6 +26,9 @@ struct Args {
     /// Antenna
     #[clap(long)]
     antenna: Option<String>,
+    /// Soapy device Filter
+    #[clap(long)]
+    device_filter: Option<String>,
     /// Seify Args
     #[clap(short, long)]
     args: Option<String>,
@@ -37,6 +41,9 @@ struct Args {
     /// WLAN Channel Number
     #[clap(short, long, value_parser = parse_channel, default_value = "34")]
     channel: f64,
+    /// send periodic messages for testing
+    #[clap(long, value_parser)]
+    tx_interval: Option<f32>,
 }
 
 use wlan::MAX_SYM;
@@ -86,7 +93,9 @@ fn main() -> Result<()> {
         "in",
         Circular::with_size(prefix_in_size),
     )?;
+    let seify_dev = Device::from_args(args.device_filter.unwrap_or(String::new())).unwrap();
     let mut snk = SinkBuilder::new()
+        .device(seify_dev)
         .frequency(args.channel)
         .sample_rate(args.sample_rate)
         .gain(args.gain);
@@ -112,14 +121,16 @@ fn main() -> Result<()> {
     let mut seq = 0u64;
     rt.block_on(async move {
         loop {
-            Timer::after(Duration::from_secs_f32(0.1)).await;
+            Timer::after(Duration::from_secs_f32(args.tx_interval.unwrap_or(0.5))).await;
             handle
                 .call(
                     0,
                     0,
                     Pmt::Any(Box::new((
-                        format!("FutureSDR {seq}xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx").as_bytes().to_vec(),
+                        format!("FutureSDR {seq}asdfasdfasdfasdfasdfasdfasdfasdfafasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdfasdfasdfasdfasdfasdffasdfasdfasdfasdfasdffasdfasdfasdfa").as_bytes().to_vec(),
+                        // format!("FutureSDR {seq}asfasdfasdfaasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdfasdfasdfasdfasdfasdffasdfasdfasdfasdfasdffasdfasdfasdfa").as_bytes().to_vec(),
                         Mcs::Qam16_1_2,
+                        // Mcs::Bpsk_1_2,
                     ))),
                 )
                 .await
