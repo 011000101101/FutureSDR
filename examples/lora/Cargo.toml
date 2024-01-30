@@ -8,6 +8,10 @@ edition = "2021"
 [workspace]
 
 [[bin]]
+name = "loopback"
+path = "src/bin/loopback.rs"
+
+[[bin]]
 name = "rx_pfb"
 path = "src/bin/rx_pfb.rs"
 

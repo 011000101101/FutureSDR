@@ -2,11 +2,23 @@ use clap::Parser;
 use futuresdr::anyhow::Result;
 use futuresdr::async_io::Timer;
 use futuresdr::blocks::seify::SinkBuilder;
+use futuresdr::blocks::seify::SourceBuilder;
+use futuresdr::blocks::BlobToUdp;
+use futuresdr::blocks::NullSink;
 use futuresdr::log::{debug, info};
+use futuresdr::macros::connect;
 use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
+use lora::Decoder;
+use lora::Deinterleaver;
+use lora::FftDemod;
+use lora::FrameSync;
+use lora::GrayMapping;
+use lora::HammingDec;
+use lora::HeaderDecoder;
+use lora::HeaderMode;
 use lora::{AddCrc, GrayDemap, HammingEnc, Header, Interleaver, Modulate, Whitening};
 use seify::Device;
 use seify::Direction::{Rx, Tx};
@@ -22,8 +34,11 @@ struct Args {
     #[clap(long)]
     device_filter: Option<String>,
     /// Zigbee RX Gain
-    #[clap(long, default_value_t = 50.0)]
+    #[clap(long, default_value_t = -40.0)]
     tx_gain: f64,
+    /// Zigbee RX Gain
+    #[clap(long, default_value_t = 10.0)]
+    rx_gain: f64,
     /// Zigbee Sample Rate
     #[clap(long, default_value_t = 125e3)]
     sample_rate: f64,
@@ -45,6 +60,9 @@ struct Args {
     /// lora bandwidth
     #[clap(long, default_value_t = 125000)]
     bandwidth: usize,
+    /// LoRa Sync Word
+    #[clap(long, default_value_t = 0x12)]
+    sync_word: u8,
 }
 
 fn main() -> Result<()> {
@@ -66,6 +84,12 @@ fn main() -> Result<()> {
         info!("setting soapy frequencies");
         // else use specified center frequency and offset
         seify_dev
+            .set_component_frequency(Rx, args.soapy_tx_channel, "RF", args.center_freq)
+            .unwrap();
+        seify_dev
+            .set_component_frequency(Rx, args.soapy_tx_channel, "BB", args.tx_freq_offset)
+            .unwrap();
+        seify_dev
             .set_component_frequency(Tx, args.soapy_tx_channel, "RF", args.center_freq)
             .unwrap();
         seify_dev
@@ -81,6 +105,9 @@ fn main() -> Result<()> {
             .set_component_frequency(Rx, args.soapy_tx_channel, "RF", args.center_freq)
             .unwrap();
         seify_dev
+            .set_component_frequency(Rx, args.soapy_tx_channel, "DEMOD", args.tx_freq_offset)
+            .unwrap();
+        seify_dev
             .set_component_frequency(
                 Tx,
                 args.soapy_tx_channel,
@@ -92,6 +119,44 @@ fn main() -> Result<()> {
         //     .set_component_frequency(Tx, args.soapy_tx_channel, "DEMOD", args.tx_freq_offset)
         //     .unwrap();
     }
+
+    let soft_decoding: bool = false;
+
+    let mut src = SourceBuilder::new()
+        .device(seify_dev.clone())
+        .sample_rate(args.bandwidth as f64)
+        .gain(args.rx_gain);
+    let src = fg.add_block(src.build().unwrap());
+    // let downsample =
+    //     FirBuilder::new_resampling::<Complex32, Complex32>(1, 1000000 / args.bandwidth);
+    let frame_sync = FrameSync::new(
+        args.center_freq as u32,
+        args.bandwidth as u32,
+        args.spreading_factor,
+        false,
+        vec![args.sync_word.into()],
+        1,
+        None,
+    );
+    let null_sink = NullSink::<f32>::new();
+    let fft_demod = FftDemod::new(soft_decoding, true, args.spreading_factor);
+    let gray_mapping = GrayMapping::new(soft_decoding);
+    let deinterleaver = Deinterleaver::new(soft_decoding);
+    let hamming_dec = HammingDec::new(soft_decoding);
+    let header_decoder = HeaderDecoder::new(HeaderMode::Explicit, false);
+    let decoder = Decoder::new();
+    // let udp_data = BlobToUdp::new("127.0.0.1:55555");
+    // let udp_rftap = BlobToUdp::new("127.0.0.1:55556");
+    connect!(fg, src
+        // > downsample
+        [Circular::with_size(2 * 4 * 8192 * 4)] frame_sync > fft_demod > gray_mapping > deinterleaver > hamming_dec > header_decoder;
+        frame_sync.log_out > null_sink;
+        header_decoder.frame_info | frame_sync.frame_info;
+        header_decoder | decoder;
+        decoder.crc_check | frame_sync.payload_crc_result;
+        // decoder.data | udp_data;
+        // decoder.rftap | udp_rftap;
+    );
 
     let mut sink = SinkBuilder::new()
         .driver(if is_soapy_dev {
@@ -119,20 +184,15 @@ fn main() -> Result<()> {
         .expect("No message_in port found!");
     let whitening = fg.add_block(whitening);
     let header = fg.add_block(Header::new(impl_head, has_crc, cr));
-    fg.connect_stream(whitening, "out", header, "in")?;
     let add_crc = fg.add_block(AddCrc::new(has_crc));
-    fg.connect_stream(header, "out", add_crc, "in")?;
     let hamming_enc = fg.add_block(HammingEnc::new(cr, args.spreading_factor));
-    fg.connect_stream(add_crc, "out", hamming_enc, "in")?;
     let interleaver = fg.add_block(Interleaver::new(
         cr as usize,
         args.spreading_factor,
         0,
         args.bandwidth,
     ));
-    fg.connect_stream(hamming_enc, "out", interleaver, "in")?;
     let gray_demap = fg.add_block(GrayDemap::new(args.spreading_factor));
-    fg.connect_stream(interleaver, "out", gray_demap, "in")?;
     let modulate = fg.add_block(Modulate::new(
         args.spreading_factor,
         args.sample_rate as usize,
@@ -142,15 +202,12 @@ fn main() -> Result<()> {
         20 * (1 << args.spreading_factor) * args.sample_rate as usize / args.bandwidth,
         Some(8),
     ));
-    fg.connect_stream(gray_demap, "out", modulate, "in")?;
-    fg.connect_stream_with_type(
-        modulate,
-        "out",
-        sink,
-        "in",
-        // Circular::with_size(2 * 4 * 8192 * 4 * 8),
-        Circular::with_size(2 * 4 * 8192 * 4 * 8 * 16),
-    )?;
+    connect!(
+        fg,
+        whitening > header > add_crc > hamming_enc > interleaver > gray_demap
+        >
+        modulate [Circular::with_size(2 * 4 * 8192 * 4 * 8 * 16)] sink;
+    );
 
     // if tx_interval is set, send messages periodically
     if let Some(tx_interval) = args.tx_interval {

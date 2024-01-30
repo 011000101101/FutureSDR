@@ -354,7 +354,7 @@ impl Kernel for Modulate {
             }
             // if (nitems_to_process)
             //     std::cout << ninput_items[0] << " " << nitems_to_process << " " << output_offset << " " << noutput_items << std::endl;
-            info! {"Modulate: producing {} samples.", output_offset};
+            // info! {"Modulate: producing {} samples.", output_offset};
             sio.input(0).consume(nitems_to_process);
             sio.output(0).produce(output_offset);
         }
