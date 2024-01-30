@@ -1,10 +1,11 @@
+use chrono::prelude::*;
 use clap::Parser;
 use futuresdr::anyhow::Result;
 use futuresdr::async_io::Timer;
 use futuresdr::blocks::seify::SinkBuilder;
 use futuresdr::blocks::seify::SourceBuilder;
-use futuresdr::blocks::BlobToUdp;
-use futuresdr::blocks::NullSink;
+use futuresdr::blocks::{BlobToUdp, Split};
+use futuresdr::blocks::{FileSink, NullSink};
 use futuresdr::log::{debug, info};
 use futuresdr::macros::connect;
 use futuresdr::runtime::buffer::circular::Circular;
@@ -20,8 +21,10 @@ use lora::HammingDec;
 use lora::HeaderDecoder;
 use lora::HeaderMode;
 use lora::{AddCrc, GrayDemap, HammingEnc, Header, Interleaver, Modulate, Whitening};
+use rustfft::num_complex::Complex32;
 use seify::Device;
 use seify::Direction::{Rx, Tx};
+use std::fmt::Debug;
 use std::time::Duration;
 
 #[derive(Parser, Debug)]
@@ -37,7 +40,7 @@ struct Args {
     #[clap(long, default_value_t = -40.0)]
     tx_gain: f64,
     /// Zigbee RX Gain
-    #[clap(long, default_value_t = 10.0)]
+    #[clap(long, default_value_t = 20.0)]
     rx_gain: f64,
     /// Zigbee Sample Rate
     #[clap(long, default_value_t = 125e3)]
@@ -126,9 +129,12 @@ fn main() -> Result<()> {
         .device(seify_dev.clone())
         .sample_rate(args.bandwidth as f64)
         .gain(args.rx_gain);
-    let src = fg.add_block(src.build().unwrap());
-    // let downsample =
-    //     FirBuilder::new_resampling::<Complex32, Complex32>(1, 1000000 / args.bandwidth);
+    let src = src.build().unwrap();
+    let split = Split::new(|x: &Complex32| (*x, *x));
+    let file_sink = FileSink::<Complex32>::new(format!(
+        "/tmp/lora_loopback_rx_{}.bin",
+        Local::now().format("%Y-%m-%d_%H-%M")
+    ));
     let frame_sync = FrameSync::new(
         args.center_freq as u32,
         args.bandwidth as u32,
@@ -147,9 +153,9 @@ fn main() -> Result<()> {
     let decoder = Decoder::new();
     // let udp_data = BlobToUdp::new("127.0.0.1:55555");
     // let udp_rftap = BlobToUdp::new("127.0.0.1:55556");
-    connect!(fg, src
-        // > downsample
-        [Circular::with_size(2 * 4 * 8192 * 4)] frame_sync > fft_demod > gray_mapping > deinterleaver > hamming_dec > header_decoder;
+    connect!(fg, src > split;
+        split.out0 > file_sink;
+        split.out1 [Circular::with_size(2 * 4 * 8192 * 4)] frame_sync > fft_demod > gray_mapping > deinterleaver > hamming_dec > header_decoder;
         frame_sync.log_out > null_sink;
         header_decoder.frame_info | frame_sync.frame_info;
         header_decoder | decoder;
@@ -172,7 +178,7 @@ fn main() -> Result<()> {
         sink = sink.antenna(a);
     }
 
-    let sink = fg.add_block(sink.build().unwrap());
+    let sink = sink.build().unwrap();
 
     let impl_head = false;
     let has_crc = true;
@@ -182,18 +188,12 @@ fn main() -> Result<()> {
     let fg_tx_port = whitening
         .message_input_name_to_id("msg")
         .expect("No message_in port found!");
-    let whitening = fg.add_block(whitening);
-    let header = fg.add_block(Header::new(impl_head, has_crc, cr));
-    let add_crc = fg.add_block(AddCrc::new(has_crc));
-    let hamming_enc = fg.add_block(HammingEnc::new(cr, args.spreading_factor));
-    let interleaver = fg.add_block(Interleaver::new(
-        cr as usize,
-        args.spreading_factor,
-        0,
-        args.bandwidth,
-    ));
-    let gray_demap = fg.add_block(GrayDemap::new(args.spreading_factor));
-    let modulate = fg.add_block(Modulate::new(
+    let header = Header::new(impl_head, has_crc, cr);
+    let add_crc = AddCrc::new(has_crc);
+    let hamming_enc = HammingEnc::new(cr, args.spreading_factor);
+    let interleaver = Interleaver::new(cr as usize, args.spreading_factor, 0, args.bandwidth);
+    let gray_demap = GrayDemap::new(args.spreading_factor);
+    let modulate = Modulate::new(
         args.spreading_factor,
         args.sample_rate as usize,
         args.bandwidth,
@@ -201,7 +201,7 @@ fn main() -> Result<()> {
         vec![42, 12],
         20 * (1 << args.spreading_factor) * args.sample_rate as usize / args.bandwidth,
         Some(8),
-    ));
+    );
     connect!(
         fg,
         whitening > header > add_crc > hamming_enc > interleaver > gray_demap

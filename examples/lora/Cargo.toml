@@ -8,6 +8,10 @@ edition = "2021"
 [workspace]
 
 [[bin]]
+name = "rx_from_file"
+path = "src/bin/rx_from_file.rs"
+
+[[bin]]
 name = "loopback"
 path = "src/bin/loopback.rs"
 
@@ -32,3 +36,4 @@ rustfft = "6.1.0"
 ordered-float = "3.9.1"
 scilib = "1.0.0"
 num-traits = "0.2"
+chrono = "0.4.33"

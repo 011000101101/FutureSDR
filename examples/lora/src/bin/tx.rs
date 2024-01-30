@@ -3,6 +3,7 @@ use futuresdr::anyhow::Result;
 use futuresdr::async_io::Timer;
 use futuresdr::blocks::seify::SinkBuilder;
 use futuresdr::log::{debug, info};
+use futuresdr::macros::connect;
 use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
@@ -119,20 +120,15 @@ fn main() -> Result<()> {
         .expect("No message_in port found!");
     let whitening = fg.add_block(whitening);
     let header = fg.add_block(Header::new(impl_head, has_crc, cr));
-    fg.connect_stream(whitening, "out", header, "in")?;
     let add_crc = fg.add_block(AddCrc::new(has_crc));
-    fg.connect_stream(header, "out", add_crc, "in")?;
     let hamming_enc = fg.add_block(HammingEnc::new(cr, args.spreading_factor));
-    fg.connect_stream(add_crc, "out", hamming_enc, "in")?;
     let interleaver = fg.add_block(Interleaver::new(
         cr as usize,
         args.spreading_factor,
         0,
         args.bandwidth,
     ));
-    fg.connect_stream(hamming_enc, "out", interleaver, "in")?;
     let gray_demap = fg.add_block(GrayDemap::new(args.spreading_factor));
-    fg.connect_stream(interleaver, "out", gray_demap, "in")?;
     let modulate = fg.add_block(Modulate::new(
         args.spreading_factor,
         args.sample_rate as usize,
@@ -142,7 +138,6 @@ fn main() -> Result<()> {
         20 * (1 << args.spreading_factor) * args.sample_rate as usize / args.bandwidth,
         Some(8),
     ));
-    fg.connect_stream(gray_demap, "out", modulate, "in")?;
     fg.connect_stream_with_type(
         modulate,
         "out",
@@ -151,6 +146,12 @@ fn main() -> Result<()> {
         // Circular::with_size(2 * 4 * 8192 * 4 * 8),
         Circular::with_size(2 * 4 * 8192 * 4 * 8 * 16),
     )?;
+    connect!(
+        fg,
+        whitening > header > add_crc > hamming_enc > interleaver > gray_demap
+        >
+        modulate [Circular::with_size(2 * 4 * 8192 * 4 * 8 * 16)] sink;
+    );
 
     // if tx_interval is set, send messages periodically
     if let Some(tx_interval) = args.tx_interval {
