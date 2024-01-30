@@ -1,6 +1,6 @@
 use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
-use futuresdr::num_complex::Complex32;
+use futuresdr::num_complex::{Complex32, ComplexFloat};
 use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
@@ -11,6 +11,7 @@ use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
 use futuresdr::runtime::WorkIo;
+use std::num::FpCategory::Nan;
 
 const MIN_GAP: usize = 480;
 const MAX_SAMPLES: usize = 540 * 80;
@@ -72,7 +73,7 @@ impl Kernel for SyncShort {
                     }
                 }
                 State::Found => {
-                    if in_cor[i] > THRESHOLD {
+                    if in_cor[i].is_finite() && in_cor[i] > THRESHOLD {
                         let f_offset = -in_abs[i].arg() / 16.0;
                         self.state = State::Copy(0, f_offset, false);
                         sio.output(0)
@@ -82,7 +83,7 @@ impl Kernel for SyncShort {
                     }
                 }
                 State::Copy(n_copied, f_offset, mut last_above_threshold) => {
-                    if in_cor[i] > THRESHOLD {
+                    if in_cor[i].is_finite() && in_cor[i] > THRESHOLD {
                         // resync
                         if last_above_threshold && n_copied > MIN_GAP {
                             let f_offset = -in_abs[i].arg() / 16.0;
