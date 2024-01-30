@@ -1341,12 +1341,13 @@ impl FrameSync {
         }
     }
 
-    /// reset STO and CFO estimates and reset state to Detext the next frame
+    /// reset STO and CFO estimates and reset state to Detect the next frame
     fn reset(&mut self) {
         self.transition_state(DecoderState::Detect, Some(SyncState::NetId2));
         self.k_hat = 0;
         self.m_sto_frac = 0.;
         self.cfo_frac_sto_frac_est = false;
+        self.ready_to_detect = true;
     }
 }
 
@@ -1448,6 +1449,11 @@ impl Kernel for FrameSync {
         }
         if items_to_output > 0 {
             sio.output(0).produce(items_to_output);
+        } else if items_to_consume == 0 && items_to_output == 0 {
+            if self.ready_to_detect && self.m_state == DecoderState::Detect {
+                // no samples consumed due to sync failure (wrong net id), but not waiting for any external event (message) to trigger new call -> set call_again manually
+                _io.call_again = true;
+            }
         }
         Ok(())
     }
