@@ -140,9 +140,9 @@ pub struct FrameSync {
     // m_should_log: bool, //< indicate that the sync values should be logged
     // off_by_one_id: f32, //< Indicate that the network identifiers where off by one and corrected (float used as saved in a float32 bin file)
     tag_from_msg_handler_to_work_channel: (mpsc::Sender<Pmt>, mpsc::Receiver<Pmt>),
-    known_valid_net_ids: [Option<u8>; 256],
-    known_valid_net_ids_reverse: [Option<u8>; 256],
-    net_id: [u8; 2],
+    known_valid_net_ids: [[bool; 256]; 256],
+    known_valid_net_ids_reverse: [[bool; 256]; 256],
+    net_id: [u16; 2],
     ready_to_detect: bool,
 }
 
@@ -183,6 +183,7 @@ impl FrameSync {
                 .add_input("payload_crc_result", Self::payload_crc_result_handler)
                 // .add_input("noise_est", Self::noise_est_handler)
                 .add_output("snr")
+                .add_output("frame_detected")
                 .build(),
             FrameSync {
                 m_state: DecoderState::Detect, //< Current state of the synchronization
@@ -261,8 +262,8 @@ impl FrameSync {
                 // m_should_log: false, //< indicate that the sync values should be logged
                 // off_by_one_id: f32  // local to work
                 tag_from_msg_handler_to_work_channel: mpsc::channel::<Pmt>(1),
-                known_valid_net_ids: [None; 256],
-                known_valid_net_ids_reverse: [None; 256],
+                known_valid_net_ids: [[false; 256]; 256],
+                known_valid_net_ids_reverse: [[false; 256]; 256],
                 net_id: [0; 2],
                 ready_to_detect: true,
             },
@@ -282,61 +283,61 @@ impl FrameSync {
     //         ninput_items_required[0] = (m_os_factor * (m_number_of_bins + 2));
     //     }
 
-    // fn estimate_cfo_frac(&self, samples: &Vec<Complex32>) -> (Vec<Complex32>, f32) {
-    //     // create longer downchirp
-    //     let mut downchirp_aug: Vec<Complex32> =
-    //         vec![Complex32::new(0., 0.); self.up_symb_to_use * self.m_number_of_bins];
-    //     for i in 0_usize..self.up_symb_to_use {
-    //         downchirp_aug[(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)]
-    //             .copy_from_slice(&self.m_downchirp[0..self.m_number_of_bins]);
-    //     }
-    //
-    //     // Dechirping
-    //     let dechirped: Vec<Complex32> = volk_32fc_x2_multiply_32fc(&samples, &downchirp_aug);
-    //     // prepare FFT
-    //     // zero padded
-    //     // let mut cx_in_cfo: Vec<Complex32> = vec![Complex32::new(0., 0.), 2 * self.up_symb_to_use * self.m_number_of_bins];
-    //     // cx_in_cfo[..(self.up_symb_to_use * self.m_number_of_bins)].copy_from_slice(dechirped.as_slice());
-    //     let mut cx_out_cfo: Vec<Complex32> =
-    //         vec![Complex32::new(0., 0.); 2 * self.up_symb_to_use * self.m_number_of_bins];
-    //     cx_out_cfo[..(self.up_symb_to_use * self.m_number_of_bins)]
-    //         .copy_from_slice(dechirped.as_slice());
-    //     // do the FFT
-    //     FftPlanner::new()
-    //         .plan_fft(cx_out_cfo.len(), FftDirection::Forward)
-    //         .process(&mut cx_out_cfo);
-    //     // Get magnitude
-    //     let fft_mag_sq: Vec<f32> = volk_32fc_magnitude_squared_32f(&cx_out_cfo);
-    //     // get argmax here
-    //     let k0: usize = argmax_float(&fft_mag_sq);
-    //
-    //     // get three spectral lines
-    //     let y_1 = fft_mag_sq[(k0 - 1) % (2 * self.up_symb_to_use * self.m_number_of_bins)];
-    //     let y0 = fft_mag_sq[k0];
-    //     let y1 = fft_mag_sq[(k0 + 1) % (2 * self.up_symb_to_use * self.m_number_of_bins)];
-    //     // set constant coeff
-    //     let u = 64. * self.m_number_of_bins as f32 / 406.5506497; // from Cui yang (15)
-    //     let v = u * 2.4674;
-    //     // RCTSL
-    //     let wa = (y1 - y_1) / (u * (y1 + y_1) + v * y0);
-    //     let ka = wa * self.m_number_of_bins as f32 / PI;
-    //     let k_residual = ((k0 as f32 + ka) / 2. / self.up_symb_to_use as f32) % 1.;
-    //     let cfo_frac = k_residual - if k_residual > 0.5 { 1. } else { 0. };
-    //     // Correct CFO frac in preamble
-    //     let cfo_frac_correc_aug: Vec<Complex32> = (0_usize
-    //         ..self.up_symb_to_use * self.m_number_of_bins)
-    //         .map(|x| {
-    //             Complex32::from_polar(
-    //                 1.,
-    //                 -2. * PI * (cfo_frac) / self.m_number_of_bins as f32 * x as f32,
-    //             )
-    //         })
-    //         .collect();
-    //
-    //     let preamble_upchirps = volk_32fc_x2_multiply_32fc(&samples, &cfo_frac_correc_aug);
-    //
-    //     (preamble_upchirps, cfo_frac)
-    // }
+    fn estimate_cfo_frac(&self, samples: &[Complex32]) -> (Vec<Complex32>, f64) {
+        // create longer downchirp
+        let mut downchirp_aug: Vec<Complex32> =
+            vec![Complex32::new(0., 0.); self.up_symb_to_use * self.m_number_of_bins];
+        for i in 0_usize..self.up_symb_to_use {
+            downchirp_aug[(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)]
+                .copy_from_slice(&self.m_downchirp[0..self.m_number_of_bins]);
+        }
+
+        // Dechirping
+        let dechirped: Vec<Complex32> = volk_32fc_x2_multiply_32fc(&samples, &downchirp_aug);
+        // prepare FFT
+        // zero padded
+        // let mut cx_in_cfo: Vec<Complex32> = vec![Complex32::new(0., 0.), 2 * self.up_symb_to_use * self.m_number_of_bins];
+        // cx_in_cfo[..(self.up_symb_to_use * self.m_number_of_bins)].copy_from_slice(dechirped.as_slice());
+        let mut cx_out_cfo: Vec<Complex32> =
+            vec![Complex32::new(0., 0.); 2 * self.up_symb_to_use * self.m_number_of_bins];
+        cx_out_cfo[..(self.up_symb_to_use * self.m_number_of_bins)]
+            .copy_from_slice(dechirped.as_slice());
+        // do the FFT
+        FftPlanner::new()
+            .plan_fft(cx_out_cfo.len(), FftDirection::Forward)
+            .process(&mut cx_out_cfo);
+        // Get magnitude
+        let fft_mag_sq: Vec<f32> = volk_32fc_magnitude_squared_32f(&cx_out_cfo);
+        // get argmax here
+        let k0: usize = argmax_float(&fft_mag_sq);
+
+        // get three spectral lines
+        let y_1 = fft_mag_sq[(k0 - 1) % (2 * self.up_symb_to_use * self.m_number_of_bins)] as f64;
+        let y0 = fft_mag_sq[k0] as f64;
+        let y1 = fft_mag_sq[(k0 + 1) % (2 * self.up_symb_to_use * self.m_number_of_bins)] as f64;
+        // set constant coeff
+        let u = 64. * self.m_number_of_bins as f64 / 406.5506497; // from Cui yang (15)
+        let v = u * 2.4674;
+        // RCTSL
+        let wa = (y1 - y_1) / (u * (y1 + y_1) + v * y0);
+        let ka = wa * self.m_number_of_bins as f64 / core::f64::consts::PI;
+        let k_residual = ((k0 as f64 + ka) / 2. / self.up_symb_to_use as f64) % 1.;
+        let cfo_frac = k_residual - if k_residual > 0.5 { 1. } else { 0. };
+        // Correct CFO frac in preamble
+        let cfo_frac_correc_aug: Vec<Complex32> = (0_usize
+            ..self.up_symb_to_use * self.m_number_of_bins)
+            .map(|x| {
+                Complex32::from_polar(
+                    1.,
+                    -2. * PI * (cfo_frac as f32) / self.m_number_of_bins as f32 * x as f32,
+                )
+            })
+            .collect();
+
+        let preamble_upchirps = volk_32fc_x2_multiply_32fc(&samples, &cfo_frac_correc_aug);
+
+        (preamble_upchirps, cfo_frac)
+    }
 
     fn estimate_cfo_frac_bernier(&self, samples: &[Complex32]) -> (Vec<Complex32>, f64) {
         let mut fft_val: Vec<Complex32> =
@@ -523,11 +524,31 @@ impl FrameSync {
         let fft_mag = volk_32fc_magnitude_squared_32f(&cx_out);
         //     sig_en += fft_mag[i];
         // }
-        let tot_en: f64 = fft_mag.iter().map(|x| *x as f64).fold(0., |acc, e| acc + e);
         // Return argmax here
         let max_idx = argmax_float(&fft_mag);
-        let sig_en = fft_mag[max_idx] as f64;
-        (10. * (sig_en / (tot_en - sig_en)).log10()) as f32
+        // let sig_en = fft_mag[max_idx] as f64;
+        let sig_en_samples = 1;
+        let noise_en_samples = 18;
+        let noise_idx = (max_idx + self.m_number_of_bins / 2) % self.m_number_of_bins;
+        let mut noise_en = fft_mag
+            .iter()
+            .cycle()
+            .skip((noise_idx - (noise_en_samples / 2)) % self.m_number_of_bins)
+            .take(9)
+            .map(|x| *x as f64)
+            .fold(0., |acc, e| acc + e)
+            / noise_en_samples as f64;
+        let sig_en = fft_mag
+            .iter()
+            .cycle()
+            .skip((max_idx - (sig_en_samples / 2)) % self.m_number_of_bins)
+            .take(3)
+            .map(|x| *x as f64)
+            .fold(0., |acc, e| acc + e)
+            / sig_en_samples as f64;
+        let dechirped_snr = (10. * (sig_en / noise_en).log10());
+        let coding_gain = 10. * ((1 << self.m_sf) as f64).log10();
+        (dechirped_snr - coding_gain) as f32
     }
 
     // self.m_noise_est only referenced here, so a noop?
@@ -557,13 +578,16 @@ impl FrameSync {
     ) -> Result<Pmt> {
         if let Pmt::Bool(crc_valid) = p {
             // payload decoded successfully, cache current net_ids for future frame corrections
-            if crc_valid && self.known_valid_net_ids[self.net_id[0] as usize].is_none() {
+            if crc_valid
+                && !self.known_valid_net_ids[self.net_id[0] as usize][self.net_id[1] as usize]
+            {
                 info!(
                     "payload decoded successfully, caching new net id: [{}, {}]",
                     self.net_id[0], self.net_id[1]
                 );
-                self.known_valid_net_ids[self.net_id[0] as usize] = Some(self.net_id[1]); // TODO
-                self.known_valid_net_ids_reverse[self.net_id[1] as usize] = Some(self.net_id[0]);
+                self.known_valid_net_ids[self.net_id[0] as usize][self.net_id[1] as usize] = true; // TODO
+                self.known_valid_net_ids_reverse[self.net_id[1] as usize]
+                    [self.net_id[0] as usize] = true;
             } else if !crc_valid {
                 info!(
                     "failed to decode payload for netid [{}, {}], dropping.",
@@ -972,129 +996,119 @@ impl FrameSync {
         )
         .unwrap()
         .try_into()
-        .expect("detected net-id was greater than 255.");
+        .expect("net-id can't be greater than SF bits, with SF<=12.");
         self.net_id[1] = FrameSync::get_symbol_val(
             &net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)],
             &self.m_downchirp,
         )
         .unwrap()
         .try_into()
-        .expect("detected net-id was greater than 255.");
+        .expect("net-id can't be greater than SF bits, with SF<=12.");
         let mut one_symbol_off = false;
         let mut off_by_one_id = false;
 
         // info!("netid1: {} (soll {})", self.net_id[0], self.m_sync_words[0]);
         // info!("netid2: {} (soll {})", self.net_id[1], self.m_sync_words[1]);
 
-        info!("netid1: {}", self.net_id[0]);
-        info!("netid2: {}", self.net_id[1]);
-        let mut sync_word_tmp: Option<[u8; 2]> = None;
-        for i in (self.net_id[0] - 2)..(self.net_id[0] + 2) {
-            if let Some(id_2) = self.known_valid_net_ids[i as usize] {
-                sync_word_tmp = Some([i, id_2]);
-                break;
-            }
+        info!("raw netid1: {}", self.net_id[0]);
+        info!("raw netid2: {}", self.net_id[1]);
+        // the last three bits of netID o and 1 are always 0 -> margin of 3 in either direction to refine CFO_int
+        let net_id_off_raw = self.net_id[0] & 0x07;
+        let net_id_off_raw_1 = self.net_id[1] & 0x07;
+        if net_id_off_raw == 0x04 {
+            info!("FrameSync: bad sync: offset > 3");
+            self.reset();
+            return (0, 0);
         }
-        if let Some(sync_word) = sync_word_tmp
-        // TODO
-        // if (netid1 as i32 - self.m_sync_words[0] as i32).abs() > 2
-        // wrong id 1, (we allow an offset of 2)
-        {
-            info!("netid1: {} (soll {})", self.net_id[0], sync_word[0]);
-            info!("netid2: {} (soll {})", self.net_id[1], sync_word[1]);
-            // net ID 1 valid
-            let net_id_off = self.net_id[0] as isize - sync_word[0] as isize;
-            if ((self.net_id[1] as isize - net_id_off) % self.m_number_of_bins as isize) as usize
-                != sync_word[1] as usize
-            // wrong id 2
-            {
+        // we have detected a syntactically valid net ID,
+        let net_id_off: i16 = if net_id_off_raw > 4 {
+            // closer to the next higher net_id
+            self.net_id[0] += 0x08;
+            // frequencies outside the BW alias and wrap around, preserving the chirp structure,
+            // but ONLY IF we ovwersample at the SDR to include the guard bands and then subsample
+            // without a lowpass filter
+            self.net_id[0] %= self.m_number_of_bins as u16;
+            // assume same offset for both parts, verify below
+            self.net_id[1] += 0x08;
+            self.net_id[1] %= self.m_number_of_bins as u16;
+            net_id_off_raw as i16 - 0x08
+        } else {
+            net_id_off_raw as i16
+        };
+        if net_id_off != 0 && net_id_off.abs() > 1 {
+            warn!("[frame_sync.rs] net id offset >1: {}", net_id_off);
+        }
+        // discard the lower bits introduced by the offset
+        self.net_id[0] &= 0xF8;
+        self.net_id[1] &= 0xF8;
+        if net_id_off_raw != net_id_off_raw_1 {
+            // check if we are in fact checking the second net ID and that the first one was considered as a preamble upchirp
+            // TODO does it make sense to require the netid to be known in this case, or is the matching offset enough to indicate we missed net_id[0] in the preamble?
+            self.net_id[1] = self.net_id[0];
+            let i = Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps - 1;
+            let net_id_1_tmp: u16 = FrameSync::get_symbol_val(
+                &corr_preamb[(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)],
+                &self.m_downchirp,
+            )
+            .unwrap()
+            .try_into()
+            .expect("net-id can't be greater than SF bits, with SF<=12.");
+            if net_id_1_tmp & 0x07 != net_id_off_raw {
+                info!(
+                    "FrameSync: bad sync: different offset for recovered net_id[0] and net_id[1]"
+                );
                 self.reset();
                 return (items_to_consume, 0);
-                // items_to_consume = 0;
+            } else if !(self.known_valid_net_ids_reverse[self.net_id[0] as usize]
+                [(net_id_1_tmp & 0xF8) as usize])
+            {
+                // TODO does it make sense to require the netid to be known in this case, or is the matching offset enough to indicate we missed net_id[0] in the preamble?
+                info!("FrameSync: bad sync: different offset for original net_id[0] and net_id[1] and no match for recovered net_id[0]");
+                self.reset();
+                return (items_to_consume, 0);
             } else {
-                if net_id_off != 0 && net_id_off.abs() > 1 {
-                    warn!("[frame_sync.rs] net id offset >1: {}", net_id_off);
-                }
+                info!("detected netid2 as netid1, recovering..");
+                self.net_id[0] = net_id_1_tmp;
+                info!("netid1: {}", self.net_id[0]);
+                info!("netid2: {}", self.net_id[1]);
+                one_symbol_off = true;
                 if m_should_log {
                     off_by_one_id = net_id_off != 0;
                 }
-                self.net_id[0] = sync_word[0];
-                self.net_id[1] = sync_word[1];
-                items_to_consume = -(self.m_os_factor as isize) * net_id_off;
+                items_to_consume = -(self.m_os_factor as isize) * net_id_off as isize;
+                // the first symbol was mistaken for the end of the downchirp. we should correct and output it.
+                let start_off = self.m_os_factor as isize / 2  // TODO check
+                    - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
+                    + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + m_cfo_int);
+                for i in (start_off..(self.m_samples_per_symbol as isize * 5 / 4))
+                    .step_by(self.m_os_factor)
+                {
+                    assert!((i - start_off) > 0);
+                    assert!(i > 0);
+                    out[(i - start_off) as usize / self.m_os_factor] =
+                        self.additional_symbol_samp[i as usize];
+                }
+                items_to_output = self.m_number_of_bins;
                 self.frame_cnt += 1;
             }
         } else {
-            // check if we are in fact checking the second net ID and that the first one was considered as a preamble upchirp
-            let mut sync_word_tmp: Option<[u8; 2]> = None;
-            for i in (self.net_id[0] - 2)..(self.net_id[0] + 2) {
-                if let Some(id_1) = self.known_valid_net_ids_reverse[i as usize] {
-                    sync_word_tmp = Some([id_1, i]);
-                    break;
-                }
+            info!("detected syntactically correct net_id with matching offset {net_id_off}");
+            info!("netid1: {}", self.net_id[0]);
+            info!("netid2: {}", self.net_id[1]);
+            if m_should_log {
+                off_by_one_id = net_id_off != 0;
             }
-            if let Some(sync_word) = sync_word_tmp {
-                let net_id_off = self.net_id[0] as isize - sync_word[1] as isize;
-                for i in (self.m_preamb_len - 2)
-                    ..(Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps)
-                {
-                    let net_id_1_tmp = FrameSync::get_symbol_val(
-                        &corr_preamb
-                            [(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)],
-                        &self.m_downchirp,
-                    )
-                    .unwrap();
-                    if net_id_1_tmp as isize + net_id_off == sync_word[0] as isize
-                    // found the first netID
-                    {
-                        info!("detected netid2 as netid1, recovering..");
-                        info!("netid1: {} (soll {})", self.net_id[0], sync_word[0]);
-                        info!("netid2: {} (soll {})", self.net_id[1], sync_word[1]);
-                        // register swap to avoid caching wrong net_ids later
-                        self.net_id[0] = sync_word[0];
-                        self.net_id[1] = sync_word[1];
-                        one_symbol_off = true;
-                        if net_id_off != 0 && net_id_off.abs() > 1 {
-                            warn!("[frame_sync.rs] net id offset >1: {}", net_id_off);
-                        }
-                        if m_should_log {
-                            off_by_one_id = net_id_off != 0;
-                        }
-                        items_to_consume = -(self.m_os_factor as isize) * net_id_off;
-                        // the first symbol was mistaken for the end of the downchirp. we should correct and output it.
-
-                        let start_off = self.m_os_factor as isize / 2
-                            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
-                            + self.m_os_factor as isize
-                                * (self.m_number_of_bins as isize / 4 + m_cfo_int);
-                        for i in (start_off..(self.m_samples_per_symbol as isize * 5 / 4))
-                            .step_by(self.m_os_factor)
-                        {
-                            assert!((i - start_off) > 0);
-                            assert!(i > 0);
-                            out[(i - start_off) as usize / self.m_os_factor] =
-                                self.additional_symbol_samp[i as usize];
-                        }
-                        items_to_output = self.m_number_of_bins;
-                        self.frame_cnt += 1;
-                    }
-                }
-                if !one_symbol_off {
-                    info!(
-                        "encountered new net id: [{}, {}], trying to decode header...",
-                        self.net_id[0], self.net_id[1]
-                    );
-                    items_to_consume = 0;
-                    self.frame_cnt += 1;
-                }
-            } else {
+            items_to_consume = -(self.m_os_factor as isize) * net_id_off as isize;
+            self.frame_cnt += 1;
+            if !(self.known_valid_net_ids[self.net_id[0] as usize][self.net_id[1] as usize]) {
                 info!(
                     "encountered new net id: [{}, {}], trying to decode header...",
                     self.net_id[0], self.net_id[1]
                 );
-                items_to_consume = 0;
-                self.frame_cnt += 1;
             }
         }
+        info!("SNR: {snr_est}dB");
+        // net IDs syntactically correct and matching offset => frame detected, proceed with trying to decode the header
         self.m_received_head = false;
         items_to_consume +=
             self.m_samples_per_symbol as isize / 4 + self.m_os_factor as isize * m_cfo_int;
@@ -1174,6 +1188,8 @@ impl FrameSync {
             let (preamble_upchirps_tmp, cfo_frac_tmp) = self.estimate_cfo_frac_bernier(
                 &self.preamble_raw[(self.m_number_of_bins - self.k_hat)..],
             );
+            // let (preamble_upchirps_tmp, cfo_frac_tmp) =
+            //     self.estimate_cfo_frac(&self.preamble_raw[(self.m_number_of_bins - self.k_hat)..]);
             self.preamble_upchirps = preamble_upchirps_tmp;
             self.m_cfo_frac = cfo_frac_tmp;
             self.m_sto_frac = self.estimate_sto_frac();
@@ -1319,6 +1335,7 @@ impl FrameSync {
             // Wait for the header to be decoded
             (0, 0)
         } else {
+            // frame fully received
             self.reset();
             (self.m_samples_per_symbol as isize, 0)
         }

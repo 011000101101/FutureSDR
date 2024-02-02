@@ -4,6 +4,7 @@ use futuresdr::anyhow::Result;
 use futuresdr::async_io::Timer;
 use futuresdr::blocks::seify::SinkBuilder;
 use futuresdr::blocks::seify::SourceBuilder;
+use futuresdr::blocks::FirBuilder;
 use futuresdr::blocks::{BlobToUdp, Split};
 use futuresdr::blocks::{FileSink, NullSink};
 use futuresdr::log::{debug, info};
@@ -64,8 +65,8 @@ struct Args {
     #[clap(long, default_value_t = 125000)]
     bandwidth: usize,
     /// LoRa Sync Word
-    #[clap(long, default_value_t = 0x12)]
-    sync_word: u8,
+    #[clap(long, default_value_t = 0x0816)]
+    sync_word: u16,
 }
 
 fn main() -> Result<()> {
@@ -128,8 +129,10 @@ fn main() -> Result<()> {
     let mut src = SourceBuilder::new()
         .device(seify_dev.clone())
         .sample_rate(args.bandwidth as f64)
+        // .sample_rate(200.0e3)
         .gain(args.rx_gain);
     let src = src.build().unwrap();
+    // let downsample = FirBuilder::new_resampling::<Complex32, Complex32>(5, 8);
     let split = Split::new(|x: &Complex32| (*x, *x));
     let file_sink = FileSink::<Complex32>::new(format!(
         "/tmp/lora_loopback_rx_{}.bin",
@@ -138,6 +141,7 @@ fn main() -> Result<()> {
     let frame_sync = FrameSync::new(
         args.center_freq as u32,
         args.bandwidth as u32,
+        // 200000,
         args.spreading_factor,
         false,
         vec![args.sync_word.into()],
@@ -153,7 +157,9 @@ fn main() -> Result<()> {
     let decoder = Decoder::new();
     // let udp_data = BlobToUdp::new("127.0.0.1:55555");
     // let udp_rftap = BlobToUdp::new("127.0.0.1:55556");
-    connect!(fg, src > split;
+    connect!(fg, src
+        // > downsample
+        > split;
         split.out0 > file_sink;
         split.out1 [Circular::with_size(2 * 4 * 8192 * 4)] frame_sync > fft_demod > gray_mapping > deinterleaver > hamming_dec > header_decoder;
         frame_sync.log_out > null_sink;
@@ -198,7 +204,8 @@ fn main() -> Result<()> {
         args.sample_rate as usize,
         args.bandwidth,
         // vec![8, 16],
-        vec![42, 12],
+        // vec![42, 12],
+        vec![args.sync_word.into()],
         20 * (1 << args.spreading_factor) * args.sample_rate as usize / args.bandwidth,
         Some(8),
     );
