@@ -20,6 +20,10 @@ name = "loopback"
 path = "src/bin/loopback.rs"
 
 [[bin]]
+name = "rx_to_file"
+path = "src/bin/rx_to_file.rs"
+
+[[bin]]
 name = "rx_pfb"
 path = "src/bin/rx_pfb.rs"
 
