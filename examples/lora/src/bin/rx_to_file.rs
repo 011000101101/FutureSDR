@@ -56,7 +56,12 @@ fn main() -> Result<()> {
         Local::now().format("%Y-%m-%d_%H-%M")
     ));
 
-    connect!(fg, src > filesink);
+    connect!(
+        fg,
+        src
+        [Circular::with_size(2 * 4 * 8192 * 4)]
+        filesink
+    );
 
     let _ = rt.run(fg);
 
