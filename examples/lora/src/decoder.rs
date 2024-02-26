@@ -89,7 +89,7 @@ impl Decoder {
                         let l = dewhitened.len();
                         let mut crc = Self::crc16(&dewhitened[0..l - 4]);
                         // XOR the obtained CRC with the last 2 data bytes
-                        crc = crc ^ dewhitened[l - 3] as u16 ^ ((dewhitened[l - 4] as u16) << 8);
+                        crc = crc ^ dewhitened[l - 3] as u16 ^ ((dewhitened[l - 4] as u16) << 8); // TODO might panic if dewhitened is shorter than 4.
                         let crc_valid: bool =
                             ((dewhitened[l - 2] as u16) + ((dewhitened[l - 1] as u16) << 8)) as i32
                                 == crc as i32;

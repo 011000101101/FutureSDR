@@ -138,14 +138,14 @@ fn main() -> Result<()> {
         20 * (1 << args.spreading_factor) * args.sample_rate as usize / args.bandwidth,
         Some(8),
     ));
-    fg.connect_stream_with_type(
-        modulate,
-        "out",
-        sink,
-        "in",
-        // Circular::with_size(2 * 4 * 8192 * 4 * 8),
-        Circular::with_size(2 * 4 * 8192 * 4 * 8 * 16),
-    )?;
+    //fg.connect_stream_with_type(
+    //    modulate,
+    //    "out",
+    //    sink,
+    //    "in",
+    // Circular::with_size(2 * 4 * 8192 * 4 * 8),
+    //    Circular::with_size(2 * 4 * 8192 * 4 * 8 * 16),
+    //)?;
     connect!(
         fg,
         whitening > header > add_crc > hamming_enc > interleaver > gray_demap

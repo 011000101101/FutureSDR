@@ -509,7 +509,14 @@ impl FrameSync {
         // std::vector<float> fft_mag(m_number_of_bins);
         // std::vector<gr_complex> dechirped(m_number_of_bins);
 
-        // kiss_fft_cfg cfg = kiss_fft_alloc(m_number_of_bins, 0, 0, 0);
+        // let mut cx_out: Vec<Complex32> = samples.iter().map(|x| *x).collect();
+        // FftPlanner::new()
+        //     .plan_fft(cx_out.len(), FftDirection::Forward)
+        //     .process(&mut cx_out);
+        // let asdf = volk_32fc_magnitude_squared_32f(&cx_out);
+        // let broad_energy = asdf.iter().map(|x| *x as f64).fold(0., |acc, e| acc + e);
+        // println!("broadband energy vec: {:?}", asdf);
+        // println!("broadband energy: {}", broad_energy);
 
         // Multiply with ideal downchirp
         let dechirped = volk_32fc_x2_multiply_32fc(samples, &self.m_downchirp);
@@ -526,29 +533,56 @@ impl FrameSync {
         // }
         // Return argmax here
         let max_idx = argmax_float(&fft_mag);
-        // let sig_en = fft_mag[max_idx] as f64;
-        let sig_en_samples = 1;
-        let noise_en_samples = 18;
-        let noise_idx = (max_idx + self.m_number_of_bins / 2) % self.m_number_of_bins;
-        let mut noise_en = fft_mag
-            .iter()
-            .cycle()
-            .skip((noise_idx - (noise_en_samples / 2)) % self.m_number_of_bins)
-            .take(9)
-            .map(|x| *x as f64)
-            .fold(0., |acc, e| acc + e)
-            / noise_en_samples as f64;
-        let sig_en = fft_mag
-            .iter()
-            .cycle()
-            .skip((max_idx - (sig_en_samples / 2)) % self.m_number_of_bins)
-            .take(3)
-            .map(|x| *x as f64)
-            .fold(0., |acc, e| acc + e)
-            / sig_en_samples as f64;
-        let dechirped_snr = (10. * (sig_en / noise_en).log10());
-        let coding_gain = 10. * ((1 << self.m_sf) as f64).log10();
-        (dechirped_snr - coding_gain) as f32
+        // println!("{:?}", fft_mag);
+        // println!("{max_idx}");
+        let sig_en = fft_mag[max_idx] as f64;
+        let sig_en_samples = 33;
+        // let noise_en_samples = self.m_number_of_bins / 2;
+        let noise_en = fft_mag.iter().map(|x| *x as f64).fold(0., |acc, e| acc + e);
+        // let noise_en_narrow_est = noise_en / fft_mag.len() as f64;
+
+        // let noise_idx = (max_idx + self.m_number_of_bins / 2) % self.m_number_of_bins;
+        // let mut noise_en_narrow = fft_mag
+        //     .iter()
+        //     .cycle()
+        //     .skip(my_modulo(
+        //         noise_idx as isize - (noise_en_samples as isize / 2),
+        //         self.m_number_of_bins,
+        //     ))
+        //     .take(noise_en_samples)
+        //     .map(|x| *x as f64)
+        //     .fold(0., |acc, e| acc + e)
+        //     / noise_en_samples as f64;
+        // let sig_plus_noise_en = fft_mag
+        //     .iter()
+        //     .cycle()
+        //     .skip(my_modulo(
+        //         max_idx as isize - (sig_en_samples as isize / 2),
+        //         self.m_number_of_bins,
+        //     ))
+        //     .take(sig_en_samples)
+        //     .map(|x| *x as f64)
+        //     .fold(0., |acc, e| acc + e);
+        // println!(
+        //     "SNR_alt {}dB",
+        //     (10. * (sig_plus_noise_en / (noise_en - sig_plus_noise_en)).log10())
+        // );
+        // let sig_en = sig_plus_noise_en - noise_en_narrow * sig_en_samples as f64;
+        // // let sig_en = sig_plus_noise_en;
+        // // let sig_en = fft_mag.iter().map(|x| *x as f64).fold(0., |acc, e| acc + e);
+        // let noise_en = noise_en_narrow * fft_mag.len() as f64;
+        // assert!(fft_mag.len() == self.m_number_of_bins);
+        // println!("{sig_en}");
+        // println!("{noise_en}");
+        // println!("{}");
+        // let sig_en = sig_plus_noise_en - noise_en_narrow_est * sig_en_samples as f64;
+        let noise_en = noise_en - sig_en;
+        let dechirped_snr = (10. * (sig_en / (noise_en)).log10());
+        // let dechirped_snr = (10. * (sig_en / noise_en).log10());
+        // println!("{dechirped_snr}dB");
+        // println!("coding_gain {}dB", coding_gain);
+        // println!("SNR_ {}dB", dechirped_snr);
+        dechirped_snr as f32
     }
 
     // self.m_noise_est only referenced here, so a noop?
@@ -1010,8 +1044,8 @@ impl FrameSync {
         // info!("netid1: {} (soll {})", self.net_id[0], self.m_sync_words[0]);
         // info!("netid2: {} (soll {})", self.net_id[1], self.m_sync_words[1]);
 
-        info!("raw netid1: {}", self.net_id[0]);
-        info!("raw netid2: {}", self.net_id[1]);
+        // info!("raw netid1: {}", self.net_id[0]);
+        // info!("raw netid2: {}", self.net_id[1]);
         // the last three bits of netID o and 1 are always 0 -> margin of 3 in either direction to refine CFO_int
         let net_id_off_raw = self.net_id[0] & 0x07;
         let net_id_off_raw_1 = self.net_id[1] & 0x07;
@@ -1069,8 +1103,8 @@ impl FrameSync {
             } else {
                 info!("detected netid2 as netid1, recovering..");
                 self.net_id[0] = net_id_1_tmp;
-                info!("netid1: {}", self.net_id[0]);
-                info!("netid2: {}", self.net_id[1]);
+                // info!("netid1: {}", self.net_id[0]);
+                // info!("netid2: {}", self.net_id[1]);
                 one_symbol_off = true;
                 if m_should_log {
                     off_by_one_id = net_id_off != 0;
@@ -1083,8 +1117,8 @@ impl FrameSync {
                 for i in (start_off..(self.m_samples_per_symbol as isize * 5 / 4))
                     .step_by(self.m_os_factor)
                 {
-                    assert!((i - start_off) > 0);
-                    assert!(i > 0);
+                    assert!((i - start_off) >= 0);
+                    assert!(i >= 0); // TODO
                     out[(i - start_off) as usize / self.m_os_factor] =
                         self.additional_symbol_samp[i as usize];
                 }
@@ -1093,8 +1127,8 @@ impl FrameSync {
             }
         } else {
             info!("detected syntactically correct net_id with matching offset {net_id_off}");
-            info!("netid1: {}", self.net_id[0]);
-            info!("netid2: {}", self.net_id[1]);
+            // info!("netid1: {}", self.net_id[0]);
+            // info!("netid2: {}", self.net_id[1]);
             if m_should_log {
                 off_by_one_id = net_id_off != 0;
             }
@@ -1107,7 +1141,7 @@ impl FrameSync {
                 );
             }
         }
-        info!("SNR: {snr_est}dB");
+        info!("SNR: {}dB", snr_est);
         // net IDs syntactically correct and matching offset => frame detected, proceed with trying to decode the header
         self.m_received_head = false;
         items_to_consume +=
@@ -1362,7 +1396,10 @@ impl FrameSync {
     fn reset(&mut self) {
         self.transition_state(DecoderState::Detect, Some(SyncState::NetId2));
         self.k_hat = 0;
+        self.m_cfo_frac = 0.;
         self.m_sto_frac = 0.;
+        self.sfo_hat = 0.;
+        self.sfo_cum = 0.;
         self.cfo_frac_sto_frac_est = false;
         self.ready_to_detect = true;
     }
@@ -1460,7 +1497,7 @@ impl Kernel for FrameSync {
             DecoderState::Sync => self.sync(sio, input, out, nitems_to_process),
             DecoderState::SfoCompensation => self.compensate_sfo(sio, out),
         };
-        assert!(nitems_to_process >= items_to_consume as usize, "tried to consume {items_to_consume} samples, but input buffer only holds {nitems_to_process}.");
+        assert!(nitems_to_process >= items_to_consume as usize, "tried to consume {items_to_consume} samples, but input buffer only holds {nitems_to_process}."); // TODO was triggered detected syntactically correct net_id with matching offset 3
         if items_to_consume > 0 {
             sio.input(0).consume(items_to_consume as usize);
         }
@@ -1471,6 +1508,9 @@ impl Kernel for FrameSync {
                 // no samples consumed due to sync failure (wrong net id), but not waiting for any external event (message) to trigger new call -> set call_again manually
                 _io.call_again = true;
             }
+        }
+        if out.len() != 0 && input.len() != 0 {
+            _io.call_again = true;
         }
         Ok(())
     }
