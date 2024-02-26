@@ -8,7 +8,7 @@ use crate::POLARITY;
 use crate::{FrameParam, MAX_PAYLOAD_SIZE};
 
 use futuresdr::anyhow::Result;
-use futuresdr::log::info;
+use futuresdr::log::{debug, info};
 use futuresdr::macros::async_trait;
 use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::Block;
@@ -163,7 +163,7 @@ impl FrameEqualizer {
         }
 
         if bytes > MAX_PAYLOAD_SIZE {
-            warn!("frame too large bytes {}", bytes);
+            debug!("frame too large bytes {}", bytes);
             return None;
         }
 
@@ -177,7 +177,7 @@ impl FrameEqualizer {
             8 => Some(FrameParam::new(Mcs::Qam64_2_3, bytes)),
             12 => Some(FrameParam::new(Mcs::Qam64_3_4, bytes)),
             _ => {
-                info!("signal: wrong encoding (r = {})", r);
+                debug!("signal: wrong encoding (r = {})", r);
                 None
             }
         }
@@ -213,7 +213,7 @@ impl Kernel for FrameEqualizer {
         }) {
             if *index == 0 {
                 if !matches!(self.state, State::Skip) {
-                    info!("frame equalizer: canceling frame");
+                    debug!("frame equalizer: canceling frame");
                 }
                 self.state = State::Sync1;
             } else {
@@ -310,7 +310,7 @@ impl Kernel for FrameEqualizer {
                             Tag::NamedAny("wifi_start".to_string(), Box::new(frame)),
                         );
                     } else {
-                        info!(
+                        debug!(
                             "signal field could not be decoded, snr {}",
                             self.equalizer.snr()
                         );

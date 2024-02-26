@@ -1,8 +1,8 @@
 use futuresdr::anyhow::Result;
 use futuresdr::async_io::block_on;
 use futuresdr::async_net::UdpSocket;
-use futuresdr::async_trait::async_trait;
 use futuresdr::log::warn;
+use futuresdr::macros::async_trait;
 use futuresdr::macros::message_handler;
 use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
@@ -14,10 +14,10 @@ use futuresdr::runtime::Pmt;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::WorkIo;
 
-use std::time::SystemTime;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
-use std::collections::hash_map::DefaultHasher;
+use std::time::SystemTime;
 
 static TUN_INTERFACE_HEADER_LEN: usize = 4;
 

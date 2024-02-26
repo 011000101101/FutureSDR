@@ -122,15 +122,16 @@ fn main() -> Result<()> {
     rt.block_on(async move {
         loop {
             Timer::after(Duration::from_secs_f32(args.tx_interval.unwrap_or(0.5))).await;
+            println!("sending frame");
             handle
                 .call(
                     0,
                     0,
                     Pmt::Any(Box::new((
-                        format!("FutureSDR {seq}asdfasdfasdfasdfasdfasdfasdfasdfafasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdfasdfasdfasdfasdfasdffasdfasdfasdfasdfasdffasdfasdfasdfa").as_bytes().to_vec(),
-                        // format!("FutureSDR {seq}asfasdfasdfaasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdfasdfasdfasdfasdfasdffasdfasdfasdfasdfasdffasdfasdfasdfa").as_bytes().to_vec(),
-                        Mcs::Qam16_1_2,
-                        // Mcs::Bpsk_1_2,
+                        // format!("FutureSDR {seq}asdfasdfasdfasdfasdfasdfasdfasdfafasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdfasdfasdfasdfasdfasdffasdfasdfasdfasdfasdffasdfasdfasdfa").as_bytes().to_vec(),
+                        format!("FutureSDR {seq}asfasdfasdfaasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdsdfasdfasdfasdfasdfasdfasdfasdfasdfasdffasdfasdfasdfafasdfasdfasdfasdfasdfasdffasdfasdfasdfasdfasdffasdfasdfasdfa").as_bytes().to_vec(),
+                        // Mcs::Qam16_1_2,
+                        Mcs::Bpsk_1_2,
                     ))),
                 )
                 .await

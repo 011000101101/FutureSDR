@@ -5,3 +5,6 @@ perf-data
 package-lock.json
 examples/multi-trx/src/__pycache__/
 .idea/
+*.uuid
+*/*.uuid
+*/*/*.uuid

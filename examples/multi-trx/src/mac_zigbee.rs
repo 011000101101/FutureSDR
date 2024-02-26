@@ -6,9 +6,10 @@ use crate::{BoundedDiscretePriorityQueue, PRIORITY_VALUES};
 use wasm_bindgen::prelude::*;
 
 use futuresdr::anyhow::Result;
-use futuresdr::async_trait::async_trait;
+use futuresdr::macros::async_trait;
 // use futuresdr::futures::FutureExt;
 use futuresdr::log::{debug, warn};
+use futuresdr::macros::message_handler;
 use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
@@ -20,7 +21,6 @@ use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
 use futuresdr::runtime::WorkIo;
-use futuresdr::macros::message_handler;
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -156,9 +156,7 @@ impl Mac {
                 }
             }
             _ => {
-                warn!(
-                    "ZigBee Mac: received wrong PMT type in RX callback (expected Pmt::Blob)"
-                );
+                warn!("ZigBee Mac: received wrong PMT type in RX callback (expected Pmt::Blob)");
             }
         }
         Ok(Pmt::Null)
@@ -187,9 +185,7 @@ impl Mac {
                 }
             }
             _ => {
-                warn!(
-                    "ZigBee Mac: received wrong PMT type in TX callback (expected Pmt::Blob)"
-                );
+                warn!("ZigBee Mac: received wrong PMT type in TX callback (expected Pmt::Blob)");
             }
         }
         Ok(Pmt::Null)

@@ -15,6 +15,7 @@ use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
+use futuresdr::seify::Device;
 
 use wlan::fft_tag_propagation;
 use wlan::parse_channel;
@@ -30,6 +31,9 @@ struct Args {
     /// Antenna
     #[clap(long)]
     antenna: Option<String>,
+    /// Soapy device Filter
+    #[clap(long)]
+    device_filter: Option<String>,
     /// Seify Args
     #[clap(short, long)]
     args: Option<String>,
@@ -54,7 +58,10 @@ fn main() -> Result<()> {
     let rt = Runtime::new();
     let mut fg = Flowgraph::new();
 
+    let filter = args.device_filter.unwrap_or_else(String::new);
+    let seify_dev = Device::from_args(filter).unwrap();
     let mut seify = SourceBuilder::new()
+        .device(seify_dev)
         .frequency(args.channel)
         .sample_rate(args.sample_rate)
         .gain(args.gain);

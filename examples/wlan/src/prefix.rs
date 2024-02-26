@@ -77,6 +77,27 @@ impl Kernel for Prefix {
                         .copy_from_slice(&input[in_offset..in_offset + 64]);
                 }
 
+                let samples: &[Complex32] =
+                    &output[self.pad_front + 320..self.pad_front + 320 + *len * 80];
+                let count = samples.len();
+                let mean_re = samples.iter().fold(0., |acc, &x| acc + x.re / count as f32);
+                let var_re = samples
+                    .iter()
+                    .fold(0., |acc, &x| acc + (x.re - mean_re) * (x.re - mean_re))
+                    / count as f32;
+                let mean_im = samples.iter().fold(0., |acc, &x| acc + x.im / count as f32);
+                let var_im = samples
+                    .iter()
+                    .fold(0., |acc, &x| acc + (x.im - mean_im) * (x.im - mean_im))
+                    / count as f32;
+                println!(
+                    "sample mean: ({}, {}), std deviation: ({}, {})",
+                    mean_re,
+                    mean_im,
+                    var_re.sqrt(),
+                    var_im.sqrt()
+                );
+
                 // windowing
                 let out_offset = self.pad_front + 320;
                 output[out_offset] = 0.5 * (output[out_offset] + SYNC_WORDS[320 - 64]);
@@ -93,11 +114,13 @@ impl Kernel for Prefix {
                     .iter_mut()
                     .take(self.pad_front + std::cmp::max(self.pad_tail, 1) + len * 80 + 320)
                     .for_each(|v| *v *= 0.6); // TODO make scaling optional and configurable
+                                              // .for_each(|v| *v *= 1.3); // TODO make scaling optional and configurable
 
                 sio.input(0).consume(len * 64);
                 let produce = self.pad_front + std::cmp::max(self.pad_tail, 1) + len * 80 + 320;
 
                 output[0..produce].iter_mut().for_each(|v| *v *= 0.6);
+                // output[0..produce].iter_mut().for_each(|v| *v *= 1.3);
 
                 sio.output(0)
                     .add_tag(0, Tag::NamedUsize("burst_start".to_string(), produce));

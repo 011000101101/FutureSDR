@@ -6,7 +6,7 @@ use wlan::MAX_ENCODED_BITS;
 use wlan::MAX_PSDU_SIZE;
 
 use futuresdr::anyhow::Result;
-use futuresdr::async_trait::async_trait;
+use futuresdr::macros::async_trait;
 // use futuresdr::futures::FutureExt;
 use futuresdr::log::warn;
 use futuresdr::macros::message_handler;

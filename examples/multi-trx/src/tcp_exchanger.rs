@@ -6,7 +6,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use futuresdr::anyhow::{bail, Context, Result};
-use futuresdr::async_trait::async_trait;
+use futuresdr::macros::async_trait;
 use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;

@@ -9,6 +9,12 @@ default-run = "loopback"
 [[bin]]
 name = "rx"
 path = "src/bin/rx.rs"
+required-features = ["aaronia_http"]
+
+[[bin]]
+name = "loopback_hw"
+path = "src/bin/loopback_hw.rs"
+required-features = ["aaronia_http"]
 
 [[bin]]
 name = "loopback"
@@ -17,6 +23,7 @@ path = "src/bin/loopback.rs"
 [[bin]]
 name = "tx"
 path = "src/bin/tx.rs"
+required-features = ["aaronia_http"]
 
 [[bin]]
 name = "aaronia"
@@ -45,6 +52,7 @@ console_error_panic_hook = "0.1"
 console_log = "1"
 gloo-net = "0.4"
 leptos = { version = "0.5", features = ["csr", "nightly"] }
-log = "0.4"
+log = { version = "0.4" }
 prophecy = { path = "../../crates/prophecy" }
 serde_json = "1.0"
+seify = { version = ">=0.9.0", features = ["aaronia_http"] }
