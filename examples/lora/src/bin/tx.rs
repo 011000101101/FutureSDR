@@ -133,8 +133,8 @@ fn main() -> Result<()> {
         args.spreading_factor,
         args.sample_rate as usize,
         args.bandwidth,
-        // vec![8, 16],
-        vec![42, 12],
+        vec![8, 16],
+        // vec![42, 12],
         20 * (1 << args.spreading_factor) * args.sample_rate as usize / args.bandwidth,
         Some(8),
     ));
