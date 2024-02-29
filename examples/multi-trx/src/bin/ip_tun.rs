@@ -33,9 +33,9 @@ use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::futures::channel::mpsc;
 // use futuresdr::futures::channel::oneshot;
 use futuresdr::futures::StreamExt;
+use futuresdr::log::debug;
 use futuresdr::log::info;
 use futuresdr::log::warn;
-use futuresdr::log::debug;
 use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Flowgraph;
@@ -52,12 +52,12 @@ use multitrx::MessageSelector;
 use multitrx::IPDSCPRewriter;
 use multitrx::MetricsReporter;
 
+use futuresdr::blocks::Delay as WlanDelay;
 use wlan::fft_tag_propagation as wlan_fft_tag_propagation;
 use wlan::parse_channel as wlan_parse_channel;
 use wlan::Decoder as WlanDecoder;
-use wlan::Delay as WlanDelay;
-use wlan::MAX_PAYLOAD_SIZE;
 use wlan::MAX_ENCODED_BITS;
+use wlan::MAX_PAYLOAD_SIZE;
 // use wlan::Encoder as WlanEncoder;
 use multitrx::Encoder as WlanEncoder;
 //use wlan::FftShift;
@@ -79,8 +79,6 @@ use zigbee::IqDelay as ZigbeeIqDelay;
 use multitrx::ZigbeeMac;
 use zigbee::ClockRecoveryMm as ZigbeeClockRecoveryMm;
 use zigbee::Decoder as ZigbeeDecoder;
-
-
 
 // const PAD_FRONT: usize = 10000;
 // const PAD_TAIL: usize = 10000;
@@ -202,7 +200,7 @@ struct Args {
 }
 
 // const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 1122580;  // TODO maybe this
-const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 8 * MAX_ENCODED_BITS;  // TODO maybe this
+const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 8 * MAX_ENCODED_BITS; // TODO maybe this
 
 const DSCP_EF: u8 = 0b101110 << 2;
 const NUM_PROTOCOLS: usize = 2;
@@ -281,12 +279,10 @@ fn main() -> Result<()> {
     //     .set_dc_offset_mode(Rx, args.soapy_rx_channel, true)
     //     .unwrap();
 
-
     // set tx and rx frequencies
     if let (Some(tx_frequency_from_channel), Some(rx_frequency_from_channel)) =
         (tx_freq[0], rx_freq[0])
     {
-
         // if channel has been provided, use channel center frequency from lookup-table
         seify_dev
             .set_frequency(Tx, args.soapy_tx_channel, tx_frequency_from_channel)
@@ -295,7 +291,6 @@ fn main() -> Result<()> {
             .set_frequency(Rx, args.soapy_rx_channel, rx_frequency_from_channel)
             .unwrap();
     } else if is_soapy_dev {
-
         info!("setting soapy frequencies");
         // else use specified center frequency and offset
         seify_dev
@@ -310,11 +305,17 @@ fn main() -> Result<()> {
         seify_dev
             .set_component_frequency(Rx, args.soapy_rx_channel, "BB", -rx_freq_offset[0])
             .unwrap();
-    } else {  // is aaronia device, no offset for TX and only one real center freq, tx center freq has to be set as center_freq+offset; also other component names
+    } else {
+        // is aaronia device, no offset for TX and only one real center freq, tx center freq has to be set as center_freq+offset; also other component names
 
         info!("setting aaronia frequencies");
         seify_dev
-            .set_component_frequency(Tx, args.soapy_tx_channel, "RF", center_freq[0] + tx_freq_offset[0])
+            .set_component_frequency(
+                Tx,
+                args.soapy_tx_channel,
+                "RF",
+                center_freq[0] + tx_freq_offset[0],
+            )
             .unwrap();
         seify_dev
             .set_component_frequency(Rx, args.soapy_rx_channel, "RF", center_freq[0])
@@ -324,14 +325,24 @@ fn main() -> Result<()> {
             .unwrap();
     }
 
-    let mut sink = SinkBuilder::new().driver(if is_soapy_dev {"soapy"} else {"aaronia_http"})
+    let mut sink = SinkBuilder::new()
+        .driver(if is_soapy_dev {
+            "soapy"
+        } else {
+            "aaronia_http"
+        })
         .device(seify_dev.clone())
         .gain(tx_gain[0]);
-        // .dev_channels(vec![args.soapy_tx_channel]);  // TODO find out how to select channel with seify
-    let mut src = SourceBuilder::new().driver(if is_soapy_dev {"soapy"} else {"aaronia_http"})
+    // .dev_channels(vec![args.soapy_tx_channel]);  // TODO find out how to select channel with seify
+    let mut src = SourceBuilder::new()
+        .driver(if is_soapy_dev {
+            "soapy"
+        } else {
+            "aaronia_http"
+        })
         .device(seify_dev)
         .gain(rx_gain[0]);
-        // .dev_channels(vec![args.soapy_rx_channel]);
+    // .dev_channels(vec![args.soapy_rx_channel]);
 
     if let Some(a) = args.tx_antenna {
         sink = sink.antenna(a);
@@ -379,8 +390,10 @@ fn main() -> Result<()> {
         .expect("No input_index port found!");
     let sink_selector = fg.add_block(sink_selector);
     fg.connect_stream_with_type(
-        sink_selector, "out0",
-        sink, "in",
+        sink_selector,
+        "out0",
+        sink,
+        "in",
         Circular::with_size(LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST),
     )?;
     // fg.connect_stream(

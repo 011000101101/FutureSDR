@@ -8,6 +8,7 @@ use futuresdr::anyhow::Result;
 use futuresdr::async_io;
 use futuresdr::async_io::block_on;
 use futuresdr::async_io::Timer;
+use futuresdr::blocks::seify::{SinkBuilder, SourceBuilder};
 use futuresdr::blocks::Apply;
 use futuresdr::blocks::Combine;
 use futuresdr::blocks::Fft;
@@ -16,20 +17,19 @@ use futuresdr::blocks::MessagePipe;
 use futuresdr::blocks::NullSink;
 use futuresdr::blocks::Selector;
 use futuresdr::blocks::SelectorDropPolicy as DropPolicy;
-use futuresdr::blocks::SoapySinkBuilder;
-use futuresdr::blocks::SoapySourceBuilder;
 use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
+use seify::Device;
 
 use multitrx::MessageSelector;
 
+use futuresdr::blocks::Delay as WlanDelay;
 use wlan::fft_tag_propagation as wlan_fft_tag_propagation;
 use wlan::parse_channel as wlan_parse_channel;
 use wlan::Decoder as WlanDecoder;
-use wlan::Delay as WlanDelay;
 use wlan::Encoder as WlanEncoder;
 use wlan::FrameEqualizer as WlanFrameEqualizer;
 use wlan::Mac as WlanMac;
@@ -106,23 +106,22 @@ fn main() -> Result<()> {
 
     let mut fg = Flowgraph::new();
 
-    let mut sink = SoapySinkBuilder::new()
-        .freq(tx_freq[0])
+    let filter = args.filter.unwrap_or_else(|| "".to_string());
+    let seify_dev = Device::from_args(&*filter).unwrap();
+    let mut sink = SinkBuilder::new()
+        .device(seify_dev.clone())
+        .frequency(tx_freq[0])
         .sample_rate(sample_rate[0])
         .gain(tx_gain[0]);
 
-    let mut src = SoapySourceBuilder::new()
-        .freq(rx_freq[0])
+    let mut src = SourceBuilder::new()
+        .device(seify_dev)
+        .frequency(rx_freq[0])
         .sample_rate(sample_rate[0])
         .gain(rx_gain[0]);
 
-    if let Some(f) = args.filter {
-        let f2 = f.clone();
-        sink = sink.filter(f);
-        src = src.filter(f2);
-    }
-    let sink = sink.build();
-    let src = src.build();
+    let sink = sink.build()?;
+    let src = src.build()?;
 
     //message handler to change frequency and sample rate during runtime
     let sink_freq_input_port_id = sink

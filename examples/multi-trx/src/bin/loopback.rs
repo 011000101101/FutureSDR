@@ -25,9 +25,9 @@ use futuresdr::runtime::Runtime;
 
 use multitrx::MessageSelector;
 
+use futuresdr::blocks::Delay as WlanDelay;
 use wlan::fft_tag_propagation as wlan_fft_tag_propagation;
 use wlan::Decoder as WlanDecoder;
-use wlan::Delay as WlanDelay;
 use wlan::Encoder as WlanEncoder;
 use wlan::FrameEqualizer as WlanFrameEqualizer;
 use wlan::Mac as WlanMac;

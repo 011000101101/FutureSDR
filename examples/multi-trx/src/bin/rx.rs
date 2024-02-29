@@ -4,6 +4,7 @@ use futuresdr::futures::StreamExt;
 
 use futuresdr::anyhow::Result;
 use futuresdr::async_io;
+use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::blocks::Apply;
 use futuresdr::blocks::Combine;
 use futuresdr::blocks::Fft;
@@ -11,16 +12,16 @@ use futuresdr::blocks::MessagePipe;
 use futuresdr::blocks::NullSink;
 use futuresdr::blocks::Selector;
 use futuresdr::blocks::SelectorDropPolicy as DropPolicy;
-use futuresdr::blocks::SoapySourceBuilder;
 use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
+use seify::Device;
 
+use futuresdr::blocks::Delay as WlanDelay;
 use wlan::fft_tag_propagation as wlan_fft_tag_propagation;
 use wlan::parse_channel as wlan_parse_channel;
 use wlan::Decoder as WlanDecoder;
-use wlan::Delay as WlanDelay;
 use wlan::FrameEqualizer as WlanFrameEqualizer;
 use wlan::MovingAverage as WlanMovingAverage;
 use wlan::SyncLong as WlanSyncLong;
@@ -76,17 +77,17 @@ fn main() -> Result<()> {
         .expect("No output_index port found!");
     let selector = fg.add_block(selector);
 
-    let mut soapy = SoapySourceBuilder::new()
-        .freq(freq[0])
+    let filter = args.filter.unwrap_or_else(|| "".to_string());
+    let seify_dev = Device::from_args(&*filter).unwrap();
+    let mut soapy = SourceBuilder::new()
+        .device(seify_dev)
+        .frequency(freq[0])
         .sample_rate(sample_rate[0])
         .gain(args.gain);
     if let Some(a) = args.antenna {
         soapy = soapy.antenna(a);
     }
-    if let Some(f) = args.filter {
-        soapy = soapy.filter(f);
-    }
-    let soapy = soapy.build();
+    let soapy = soapy.build()?;
 
     //message handler to change frequency and sample rate during runtime
     let freq_input_port_id = soapy

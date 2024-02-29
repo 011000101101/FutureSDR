@@ -77,26 +77,26 @@ impl Kernel for Prefix {
                         .copy_from_slice(&input[in_offset..in_offset + 64]);
                 }
 
-                let samples: &[Complex32] =
-                    &output[self.pad_front + 320..self.pad_front + 320 + *len * 80];
-                let count = samples.len();
-                let mean_re = samples.iter().fold(0., |acc, &x| acc + x.re / count as f32);
-                let var_re = samples
-                    .iter()
-                    .fold(0., |acc, &x| acc + (x.re - mean_re) * (x.re - mean_re))
-                    / count as f32;
-                let mean_im = samples.iter().fold(0., |acc, &x| acc + x.im / count as f32);
-                let var_im = samples
-                    .iter()
-                    .fold(0., |acc, &x| acc + (x.im - mean_im) * (x.im - mean_im))
-                    / count as f32;
-                println!(
-                    "sample mean: ({}, {}), std deviation: ({}, {})",
-                    mean_re,
-                    mean_im,
-                    var_re.sqrt(),
-                    var_im.sqrt()
-                );
+                // let samples: &[Complex32] =
+                //     &output[self.pad_front + 320..self.pad_front + 320 + *len * 80];
+                // let count = samples.len();
+                // let mean_re = samples.iter().fold(0., |acc, &x| acc + x.re / count as f32);
+                // let var_re = samples
+                //     .iter()
+                //     .fold(0., |acc, &x| acc + (x.re - mean_re) * (x.re - mean_re))
+                //     / count as f32;
+                // let mean_im = samples.iter().fold(0., |acc, &x| acc + x.im / count as f32);
+                // let var_im = samples
+                //     .iter()
+                //     .fold(0., |acc, &x| acc + (x.im - mean_im) * (x.im - mean_im))
+                //     / count as f32;
+                // println!(
+                //     "sample mean: ({}, {}), std deviation: ({}, {})",
+                //     mean_re,
+                //     mean_im,
+                //     var_re.sqrt(),
+                //     var_im.sqrt()
+                // );
 
                 // windowing
                 let out_offset = self.pad_front + 320;

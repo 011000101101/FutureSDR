@@ -42,9 +42,9 @@ use multitrx::MetricsReporter;
 use multitrx::TcpSink;
 use multitrx::TcpSource;
 
+use futuresdr::blocks::Delay as WlanDelay;
 use wlan::fft_tag_propagation as wlan_fft_tag_propagation;
 use wlan::Decoder as WlanDecoder;
-use wlan::Delay as WlanDelay;
 use wlan::MAX_PAYLOAD_SIZE;
 // use wlan::Encoder as WlanEncoder;
 use multitrx::Encoder as WlanEncoder;
