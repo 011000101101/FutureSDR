@@ -863,7 +863,7 @@ impl FrameSync {
         out: &mut [Complex32],
         nitems_to_process: usize,
     ) -> (isize, usize) {
-        let mut items_to_consume = 0;
+        let mut items_to_consume = self.m_samples_per_symbol as isize / 4;  // TODO always consume the remaining quarter of the second NetId (except when the offsets added below become more negative than 1/4 symbol length), left over by the previous state as a buffer
         let mut items_to_output = 0;
         let mut sync_log_out: &mut [f32] = &mut [];
         let m_should_log = if sio.outputs().len() == 2 {
@@ -872,16 +872,17 @@ impl FrameSync {
         } else {
             false
         };
+        let offset = items_to_consume as usize; // currently assumed start of the quarter down symbol, which might in fact already be payload (first m_samples_per_symbol already filled in sync->Down2)
         let count = self.m_samples_per_symbol;
         self.additional_symbol_samp[self.m_samples_per_symbol..(self.m_samples_per_symbol + count)]
-            .copy_from_slice(&input[0..count]);
+            .copy_from_slice(&input[offset..(offset+count)]);
         let m_cfo_int = if let Some(down_val) = self.down_val {
             // info!("down_val: {}", down_val);
             // tuning CFO entails re-tuning STO (to not lose alignment of preamble upchirps) -> slope is normalized to 1 -> move half distance in frequency -> entails moving half distance in time -> aligns downchirp with sampling window, while keeping alignment of upchirps
             // if CFO_int is 0, this check is perfectly aligned with the second downchirp.
             // if it is less than 0, we have the full first downchirp before to still give a valid (modulated) downchirp
             // if it is higher than one, we have a quarter upchirp ahead, which is enough, as we can only (or rather assume to) be misaligned by not more than 1/4 symbol in time at this point. (re-aligning by 1/4 t_sym in time entails shifting by 1/4 BW in freqeuncy, which shifts symbols by half in the observed window due to aliasing)
-            // otherwise we were off by more than 1/4 the BW in either direction, which is too much for this algorithm to compensate  // TODO check reasoning
+            // otherwise we were off by more than 1/4 the BW in either direction, which is too much for this algorithm to compensate
             if down_val < self.m_number_of_bins / 2 {
                 down_val as isize / 2
             } else {
@@ -891,6 +892,7 @@ impl FrameSync {
         } else {
             panic!("self.down_val must not be None here.")
         };
+
         // info!("m_cfo_int: {}", m_cfo_int);
         let cfo_int_modulo = my_modulo(m_cfo_int, self.m_number_of_bins);
         // info!(
@@ -1125,16 +1127,16 @@ impl FrameSync {
                 if m_should_log {
                     off_by_one_id = net_id_off != 0;
                 }
-                items_to_consume = -(self.m_os_factor as isize) * net_id_off as isize;
+                items_to_consume -= -(self.m_os_factor as isize) * net_id_off as isize;
                 // the first symbol was mistaken for the end of the downchirp. we should correct and output it.
-                let start_off = self.m_os_factor as isize / 2  // TODO check
+                let start_off = self.m_os_factor as isize / 2  // start half a sample delayed to have a buffer for the following STOfrac (of value +-1/2 sample) ->
                     - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
                     + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + m_cfo_int);
                 for i in (start_off..(self.m_samples_per_symbol as isize * 5 / 4))
                     .step_by(self.m_os_factor)
                 {
-                    assert!((i - start_off) >= 0);
-                    assert!(i >= 0); // TODO
+                    // assert!((i - start_off) >= 0);
+                    // assert!(i >= 0);  // first term of start_off >= 0, second term >= 0 (m_cfo_int >= -m_number_of_bins/4)
                     out[(i - start_off) as usize / self.m_os_factor] =
                         self.additional_symbol_samp[i as usize];
                 }
@@ -1149,7 +1151,8 @@ impl FrameSync {
                 off_by_one_id = net_id_off != 0;
             }
             // correct remaining offset in time only, as correction in frequency only necessary for estimating SFO (by first estimating CFO), and SFO is only estimated once per frame.
-            items_to_consume = -(self.m_os_factor as isize) * net_id_off as isize;
+            // can shift by additional 3 samples -> "buffer" (not zet consumed samples up to the beginning of the payload) needs to be |min(m_cfo_int)|+3 = m_samples_per_symbol/4+3 samples long
+            items_to_consume -= -(self.m_os_factor as isize) * net_id_off as isize;
             self.frame_cnt += 1;
             if !(self.known_valid_net_ids[self.net_id[0] as usize][self.net_id[1] as usize]) {
                 info!(
@@ -1165,7 +1168,7 @@ impl FrameSync {
         items_to_consume +=
             self.m_samples_per_symbol as isize / 4 + self.m_os_factor as isize * m_cfo_int;
         assert!(items_to_consume <= nitems_to_process as isize, "must not happen, we already altered persistent state.");
-        assert!(items_to_consume >= 0_isize, "must not happen, can not consume negative amount of samples. Implies net_id_off({net_id_off}) - m_cfo_int({m_cfo_int}) was greater than self.m_number_of_bins({})", self.m_number_of_bins);
+        //assert!(items_to_consume >= 0_isize, "must not happen, can not consume negative amount of samples. Implies net_id_off({net_id_off}) - m_cfo_int({m_cfo_int}) was greater than self.m_number_of_bins({})", self.m_number_of_bins);
         // info!("Frame Detected!!!!!!!!!!");
         // update sto_frac to its value at the payload beginning
         self.m_sto_frac += self.sfo_hat * 4.25;
@@ -1190,7 +1193,6 @@ impl FrameSync {
         } else {
             self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId1));
         };
-        // let mut snr_est2: f32 = 0.;  // TODO unused
 
         if m_should_log {
             // estimate SNR
@@ -1218,11 +1220,6 @@ impl FrameSync {
         //
         //                         std::cout << "[frame_sync_impl.cc] " << frame_cnt << " CFO estimate: " << m_cfo_int + m_cfo_frac << ", STO estimate: " << k_hat - m_cfo_int + m_sto_frac << " snr est: " << snr_est << std::endl;
         // #endif
-        // } else {
-        //     // TODO aborting here means there are still persistent changes in self.preamble_upchirps and self.m_sto_frac
-        //     self.reset();
-        //     return (0, 0);
-        // }
         (items_to_consume, items_to_output)
     }
 
@@ -1342,6 +1339,9 @@ impl FrameSync {
                 let count = self.m_samples_per_symbol;
                 self.additional_symbol_samp[0..count].copy_from_slice(&input[0..count]);
                 self.transition_state(DecoderState::Sync, Some(SyncState::QuarterDown));
+                // only consume 3/4 of the symbol, as we need an additional buffer in the following QarterDown state to cope with severely negative STO_int
+                // also work only ensures that there is one full symbol in the input queue before calling the subfunctions, so by leaving 1/4 of the second downchirp, we will have one half symbol time in either direction to re-sync in the next step
+                (items_to_consume, items_to_output) = ((self.m_samples_per_symbol as isize * 3) / 4, 0);
             }
             SyncState::QuarterDown => {
                 (items_to_consume, items_to_output) =
@@ -1517,7 +1517,8 @@ impl Kernel for FrameSync {
             DecoderState::Sync => self.sync(sio, input, out, nitems_to_process),
             DecoderState::SfoCompensation => self.compensate_sfo(sio, out),
         };
-        assert!(nitems_to_process >= items_to_consume as usize, "tried to consume {items_to_consume} samples, but input buffer only holds {nitems_to_process}."); // TODO was triggered detected syntactically correct net_id with matching offset 3
+        assert!(items_to_consume >= 0, "tried to consume negative amount of samples ({items_to_consume})");
+        assert!(nitems_to_process >= items_to_consume as usize, "tried to consume {items_to_consume} samples, but input buffer only holds {nitems_to_process}.");
         if items_to_consume > 0 {
             sio.input(0).consume(items_to_consume as usize);
         }
