@@ -171,6 +171,11 @@ impl FrameSync {
         let (m_upchirp_tmp, m_downchirp_tmp) = build_ref_chirps(sf, 1); // vec![0; m_number_of_bins_tmp]
                                                                         // let (m_upchirp_tmp, m_downchirp_tmp) = build_ref_chirps(sf, os_factor); // TODO
 
+        let mut known_valid_net_ids: [[bool; 256]; 256] = [[false; 256]; 256];
+        known_valid_net_ids[sync_word_tmp[0]][sync_word_tmp[1]] = true;
+        let mut known_valid_net_ids_reverse: [[bool; 256]; 256] = [[false; 256]; 256];
+        known_valid_net_ids_reverse[sync_word_tmp[1]][sync_word_tmp[0]] = true;
+
         Block::new(
             BlockMetaBuilder::new("FrameSync").build(),
             StreamIoBuilder::new()
@@ -227,7 +232,7 @@ impl FrameSync {
                 ], //< vector of the oversampled network identifier samples
 
                 bin_idx: None,                 //< value of previous lora symbol
-                symbol_cnt: SyncState::NetId2, //< Number of symbols already received  // TODO NetId2
+                symbol_cnt: SyncState::NetId2, //< Number of symbols already received
                 k_hat: 0,                      //< integer part of CFO+STO
                 preamb_up_vals: vec![0; preamble_len_tmp - 3], //< value of the preamble upchirps
                 frame_cnt: 0,                  //< Number of frame received
@@ -262,8 +267,8 @@ impl FrameSync {
                 // m_should_log: false, //< indicate that the sync values should be logged
                 // off_by_one_id: f32  // local to work
                 tag_from_msg_handler_to_work_channel: mpsc::channel::<Pmt>(1),
-                known_valid_net_ids: [[false; 256]; 256],
-                known_valid_net_ids_reverse: [[false; 256]; 256],
+                known_valid_net_ids: known_valid_net_ids,
+                known_valid_net_ids_reverse: known_valid_net_ids_reverse,
                 net_id: [0; 2],
                 ready_to_detect: true,
             },
@@ -872,9 +877,15 @@ impl FrameSync {
             .copy_from_slice(&input[0..count]);
         let m_cfo_int = if let Some(down_val) = self.down_val {
             // info!("down_val: {}", down_val);
+            // tuning CFO entails re-tuning STO (to not lose alignment of preamble upchirps) -> slope is normalized to 1 -> move half distance in frequency -> entails moving half distance in time -> aligns downchirp with sampling window, while keeping alignment of upchirps
+            // if CFO_int is 0, this check is perfectly aligned with the second downchirp.
+            // if it is less than 0, we have the full first downchirp before to still give a valid (modulated) downchirp
+            // if it is higher than one, we have a quarter upchirp ahead, which is enough, as we can only (or rather assume to) be misaligned by not more than 1/4 symbol in time at this point. (re-aligning by 1/4 t_sym in time entails shifting by 1/4 BW in freqeuncy, which shifts symbols by half in the observed window due to aliasing)
+            // otherwise we were off by more than 1/4 the BW in either direction, which is too much for this algorithm to compensate  // TODO check reasoning
             if down_val < self.m_number_of_bins / 2 {
                 down_val as isize / 2
             } else {
+                // if ahead by more than half a symbol, we are _probably_ actually behind by less than half a symbol
                 (down_val as isize - self.m_number_of_bins as isize) / 2
             }
         } else {
@@ -887,9 +898,13 @@ impl FrameSync {
         //     cfo_int_modulo
         // );
 
+        // *******
+        // re-estimate sto_frac and estimate SFO
+        // *******
         // correct STOint and CFOint in the preamble upchirps
+        // correct STOint
         self.preamble_upchirps.rotate_left(cfo_int_modulo);
-
+        // correct CFOint
         let cfo_int_correc: Vec<Complex32> = (0_usize
             ..((Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps)
                 * self.m_number_of_bins))
@@ -900,18 +915,20 @@ impl FrameSync {
                 )
             })
             .collect();
-
         self.preamble_upchirps =
             volk_32fc_x2_multiply_32fc(&self.preamble_upchirps, &cfo_int_correc); // count: up_symb_to_use * m_number_of_bins
-
         // correct SFO in the preamble upchirps
-
         self.sfo_hat = (m_cfo_int as f32 + self.m_cfo_frac as f32) * self.m_bw as f32
             / self.m_center_freq as f32;
+        /// CFO normalized to carrier frequency
         let clk_off = self.sfo_hat / self.m_number_of_bins as f32;
         let fs = self.m_bw as f32;
+        // we wanted f_c_true, got f_c_true+cfo_int+cfo_fraq -> f_c = f_c_true-cfo_int-cfo_fraq -> f_c = f_c_true - (cfo_int+cfo_fraq) -> normalized "clock offset" of f_c/f_c_true=1-(cfo_int+cfo_fraq)/f_c_true
+        // assume linear offset: we wanted BW, assume we got fs_p=BW-(cfo_int+cfo_fraq)/f_c_true*BW -> fs_p=BW*(1-(cfo_int+cfo_fraq)/f_c_true)
+        // compute actual sampling frequency fs_p to be able to compensate
         let fs_p = fs * (1. - clk_off);
         let n = self.m_number_of_bins;
+        // correct SFO
         let sfo_corr_vect: Vec<Complex32> = (0..((Into::<usize>::into(self.m_n_up_req)
             + self.additional_upchirps)
             * self.m_number_of_bins))
@@ -926,16 +943,14 @@ impl FrameSync {
                 )
             })
             .collect();
-
         let count = self.up_symb_to_use * self.m_number_of_bins;
         let tmp =
             volk_32fc_x2_multiply_32fc(&self.preamble_upchirps[0..count], &sfo_corr_vect[0..count]);
         self.preamble_upchirps[0..count].copy_from_slice(&tmp);
-
-        let tmp_sto_frac = self.estimate_sto_frac(); // better estimation of sto_frac in the beginning of the upchirps
+        // re-estimate sto_frac based on the now corrected self.preamble_upchirps to get better estimate than in the beginning of the upchirps
+        let tmp_sto_frac = self.estimate_sto_frac();
         let diff_sto_frac = self.m_sto_frac - tmp_sto_frac;
-
-        if diff_sto_frac.abs() <= (self.m_os_factor - 1) as f32 / self.m_os_factor as f32 {
+        if diff_sto_frac.abs() <= (self.m_os_factor - 1) as f32 / self.m_os_factor as f32 {  // TODO always prevents update if os_factor = 1
             // avoid introducing off-by-one errors by estimating fine_sto=-0.499 , rough_sto=0.499
             self.m_sto_frac = tmp_sto_frac;
         }
@@ -984,9 +999,10 @@ impl FrameSync {
             self.m_sto_frac += if self.m_sto_frac > 0. { -1. } else { 1. };
         }
         // decim net id according to new sto_frac and sto int
-        // start_off gives the offset in the net_id_samp vector required to be aligned in time (CFOint is equivalent to STOint since upchirp_val was forced to 0)
+        // start_off gives the offset in the net_id_samp vector required to be aligned in time (CFOint is equivalent to STOint at this point, since upchirp_val was forced to 0, and initial alignment has already been performed. note that CFOint here is only the remainder of STOint that needs to be re-aligned.)
         let start_off = (self.m_os_factor as isize / 2
             - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
+            // self.m_number_of_bins as isize / 4 is manually introduced static NET_ID_1 start offset in array before CFO alignment to be able to align negative m_cfo_int offsets
             + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + m_cfo_int))
             as usize;
         // info!("self.m_os_factor / 2: {}", self.m_os_factor / 2);
@@ -1132,6 +1148,7 @@ impl FrameSync {
             if m_should_log {
                 off_by_one_id = net_id_off != 0;
             }
+            // correct remaining offset in time only, as correction in frequency only necessary for estimating SFO (by first estimating CFO), and SFO is only estimated once per frame.
             items_to_consume = -(self.m_os_factor as isize) * net_id_off as isize;
             self.frame_cnt += 1;
             if !(self.known_valid_net_ids[self.net_id[0] as usize][self.net_id[1] as usize]) {
@@ -1144,65 +1161,68 @@ impl FrameSync {
         info!("SNR: {}dB", snr_est);
         // net IDs syntactically correct and matching offset => frame detected, proceed with trying to decode the header
         self.m_received_head = false;
+        // consume the quarter downchirp, and at the same time correct CFOint (already applied correction for NET_ID recovery was only in retrospect on a local buffer)
         items_to_consume +=
             self.m_samples_per_symbol as isize / 4 + self.m_os_factor as isize * m_cfo_int;
-        if items_to_consume <= nitems_to_process as isize {
-            // info!("Frame Detected!!!!!!!!!!");
-            // update sto_frac to its value at the payload beginning
-            self.m_sto_frac += self.sfo_hat * 4.25;
-            self.sfo_cum = ((self.m_sto_frac * self.m_os_factor as f32)
-                - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32) as f32)
-                / self.m_os_factor as f32;
+        assert!(items_to_consume <= nitems_to_process as isize, "must not happen, we already altered persistent state.");
+        assert!(items_to_consume >= 0_isize, "must not happen, can not consume negative amount of samples. Implies net_id_off({net_id_off}) - m_cfo_int({m_cfo_int}) was greater than self.m_number_of_bins({})", self.m_number_of_bins);
+        // info!("Frame Detected!!!!!!!!!!");
+        // update sto_frac to its value at the payload beginning
+        self.m_sto_frac += self.sfo_hat * 4.25;
+        self.sfo_cum = ((self.m_sto_frac * self.m_os_factor as f32)
+            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32) as f32)
+            / self.m_os_factor as f32;
 
-            let mut frame_info: HashMap<String, Pmt> = HashMap::new();
+        let mut frame_info: HashMap<String, Pmt> = HashMap::new();
 
-            frame_info.insert(String::from("is_header"), Pmt::Bool(true));
-            frame_info.insert(String::from("cfo_int"), Pmt::F32(m_cfo_int as f32));
-            frame_info.insert(String::from("cfo_frac"), Pmt::F64(self.m_cfo_frac));
-            frame_info.insert(String::from("sf"), Pmt::Usize(self.m_sf));
-            let frame_info_pmt = Pmt::MapStrPmt(frame_info);
+        frame_info.insert(String::from("is_header"), Pmt::Bool(true));
+        frame_info.insert(String::from("cfo_int"), Pmt::F32(m_cfo_int as f32));
+        frame_info.insert(String::from("cfo_frac"), Pmt::F64(self.m_cfo_frac));
+        frame_info.insert(String::from("sf"), Pmt::Usize(self.m_sf));
+        let frame_info_pmt = Pmt::MapStrPmt(frame_info);
 
-            sio.output(0).add_tag(
-                0,
-                Tag::NamedAny("frame_info".to_string(), Box::new(frame_info_pmt)),
-            );
-            if one_symbol_off {
-                self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId2));
-            } else {
-                self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId1));
-            };
-            // let mut snr_est2: f32 = 0.;  // TODO unused
-
-            if m_should_log {
-                // estimate SNR
-
-                // for i in 0..self.up_symb_to_use {
-                //     snr_est2 += self.determine_snr(
-                //         &self.preamble_upchirps[(i * self.m_number_of_bins)
-                //             ..((i + 1) * self.m_number_of_bins)],
-                //     );
-                // }
-                // snr_est2 /= self.up_symb_to_use as f32;
-                let cfo_log = m_cfo_int as f32 + self.m_cfo_frac as f32;
-                let sto_log = (self.k_hat as isize - m_cfo_int) as f32 + self.m_sto_frac;
-                let srn_log = snr_est;
-                let sfo_log = self.sfo_hat;
-
-                sync_log_out[0] = srn_log;
-                sync_log_out[1] = cfo_log;
-                sync_log_out[2] = sto_log;
-                sync_log_out[3] = sfo_log;
-                sync_log_out[4] = if off_by_one_id { 1. } else { 0. };
-                sio.output(1).produce(5);
-            }
-            // #ifdef PRINT_INFO
-            //
-            //                         std::cout << "[frame_sync_impl.cc] " << frame_cnt << " CFO estimate: " << m_cfo_int + m_cfo_frac << ", STO estimate: " << k_hat - m_cfo_int + m_sto_frac << " snr est: " << snr_est << std::endl;
-            // #endif
+        sio.output(0).add_tag(
+            0,
+            Tag::NamedAny("frame_info".to_string(), Box::new(frame_info_pmt)),
+        );
+        if one_symbol_off {
+            self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId2));
         } else {
-            self.reset();
-            return (0, 0);
+            self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId1));
+        };
+        // let mut snr_est2: f32 = 0.;  // TODO unused
+
+        if m_should_log {
+            // estimate SNR
+
+            // for i in 0..self.up_symb_to_use {
+            //     snr_est2 += self.determine_snr(
+            //         &self.preamble_upchirps[(i * self.m_number_of_bins)
+            //             ..((i + 1) * self.m_number_of_bins)],
+            //     );
+            // }
+            // snr_est2 /= self.up_symb_to_use as f32;
+            let cfo_log = m_cfo_int as f32 + self.m_cfo_frac as f32;
+            let sto_log = (self.k_hat as isize - m_cfo_int) as f32 + self.m_sto_frac;
+            let srn_log = snr_est;
+            let sfo_log = self.sfo_hat;
+
+            sync_log_out[0] = srn_log;
+            sync_log_out[1] = cfo_log;
+            sync_log_out[2] = sto_log;
+            sync_log_out[3] = sfo_log;
+            sync_log_out[4] = if off_by_one_id { 1. } else { 0. };
+            sio.output(1).produce(5);
         }
+        // #ifdef PRINT_INFO
+        //
+        //                         std::cout << "[frame_sync_impl.cc] " << frame_cnt << " CFO estimate: " << m_cfo_int + m_cfo_frac << ", STO estimate: " << k_hat - m_cfo_int + m_sto_frac << " snr est: " << snr_est << std::endl;
+        // #endif
+        // } else {
+        //     // TODO aborting here means there are still persistent changes in self.preamble_upchirps and self.m_sto_frac
+        //     self.reset();
+        //     return (0, 0);
+        // }
         (items_to_consume, items_to_output)
     }
 
