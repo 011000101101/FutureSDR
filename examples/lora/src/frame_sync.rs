@@ -920,9 +920,10 @@ impl FrameSync {
         self.preamble_upchirps =
             volk_32fc_x2_multiply_32fc(&self.preamble_upchirps, &cfo_int_correc); // count: up_symb_to_use * m_number_of_bins
         // correct SFO in the preamble upchirps
+        /// SFO times symbol duration = number of samples we need to compensate the symbol duration by
         self.sfo_hat = (m_cfo_int as f32 + self.m_cfo_frac as f32) * self.m_bw as f32
             / self.m_center_freq as f32;
-        /// CFO normalized to carrier frequency
+        /// CFO normalized to carrier frequency / SFO times t_samp
         let clk_off = self.sfo_hat / self.m_number_of_bins as f32;
         let fs = self.m_bw as f32;
         // we wanted f_c_true, got f_c_true+cfo_int+cfo_fraq -> f_c = f_c_true-cfo_int-cfo_fraq -> f_c = f_c_true - (cfo_int+cfo_fraq) -> normalized "clock offset" of f_c/f_c_true=1-(cfo_int+cfo_fraq)/f_c_true
@@ -1377,9 +1378,10 @@ impl FrameSync {
             let mut items_to_consume = self.m_samples_per_symbol as isize;
 
             //   update sfo evolution
+            // if cumulative SFO is greater than 1/2 sample duration
             if self.sfo_cum.abs() > 1.0 / 2. / self.m_os_factor as f32 {
-                items_to_consume -= -2 * self.sfo_cum.signum() as isize + 1;
-                self.sfo_cum -= (-2. * self.sfo_cum.signum() + 1.) * 1.0 / self.m_os_factor as f32;
+                items_to_consume -= self.sfo_cum.signum() as isize;  // TODO why only use the sign bit? could it not be larger than 1.5 samples, making it necessary to compensate by more than 1?
+                self.sfo_cum -= self.sfo_cum.signum() / self.m_os_factor as f32;
             }
             self.sfo_cum += self.sfo_hat;
             self.increase_symbol_count();
