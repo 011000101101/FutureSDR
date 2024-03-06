@@ -865,7 +865,7 @@ impl FrameSync {
         out: &mut [Complex32],
         nitems_to_process: usize,
     ) -> (isize, usize) {
-        let mut items_to_consume = self.m_samples_per_symbol as isize / 4;  // TODO always consume the remaining quarter of the second NetId (except when the offsets added below become more negative than 1/4 symbol length), left over by the previous state as a buffer
+        let mut items_to_consume = 3;  // always consume the remaining three samples of the second NetId (except when the offsets added below become more negative than 1/4 symbol length), left over by the previous state as a buffer
         let mut items_to_output = 0;
         let mut sync_log_out: &mut [f32] = &mut [];
         let m_should_log = if sio.outputs().len() == 2 {
@@ -876,6 +876,7 @@ impl FrameSync {
         };
         let offset = items_to_consume as usize; // currently assumed start of the quarter down symbol, which might in fact already be payload (first m_samples_per_symbol already filled in sync->Down2)
         let count = self.m_samples_per_symbol;
+        // requires self.m_samples_per_symbol samples in input buffer, but QuarterDown also needs 'backward' access to up to 3 samples for net-id re-synching when CFO is at minimum
         self.additional_symbol_samp[self.m_samples_per_symbol..(self.m_samples_per_symbol + count)]
             .copy_from_slice(&input[offset..(offset+count)]);
         let m_cfo_int = if let Some(down_val) = self.down_val {
@@ -1354,9 +1355,9 @@ impl FrameSync {
                 let count = self.m_samples_per_symbol;
                 self.additional_symbol_samp[0..count].copy_from_slice(&input[0..count]);
                 self.transition_state(DecoderState::Sync, Some(SyncState::QuarterDown));
-                // only consume 3/4 of the symbol, as we need an additional buffer in the following QarterDown state to cope with severely negative STO_int
-                // also work only ensures that there is one full symbol in the input queue before calling the subfunctions, so by leaving 1/4 of the second downchirp, we will have one half symbol time in either direction to re-sync in the next step
-                (items_to_consume, items_to_output) = ((self.m_samples_per_symbol as isize * 3) / 4, 0);
+                // do not consume the last three samples of the symbol zet, as we need an additional buffer in the following QarterDown state to cope with severely negative STO_int
+                // also work only ensures that there is one full symbol plus these three in the input queue before calling the subfunctions, so by leaving 3 samples of the second downchirp, we will have 1/4 symbol time + 3 samples to sync backward, but also a full new symbol for the additional_symbol_samp buffer
+                (items_to_consume, items_to_output) = (self.m_samples_per_symbol as isize - 3, 0);
             }
             SyncState::QuarterDown => {
                 (items_to_consume, items_to_output) =
@@ -1506,7 +1507,7 @@ impl Kernel for FrameSync {
         // }
 
         if nitems_to_process < self.m_number_of_bins + 2
-            || nitems_to_process < self.m_samples_per_symbol
+            || nitems_to_process < self.m_samples_per_symbol + 3  // 3 additional samples to cope with demand of QuarterDown (3 samples "backward" and 1 symbol forward)
         {
             // TODO check, condition taken from self.forecast()
             return Ok(());
