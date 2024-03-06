@@ -701,14 +701,16 @@ impl FrameSync {
                     ldro_mode_tmp
                 };
 
-                self.m_symb_numb = 8
-                    + ((2 * m_pay_len - self.m_sf
+                let m_symb_numb_tmp = 8_isize
+                    + ((2 * m_pay_len as isize - self.m_sf as isize
                         + 2
-                        + (!self.m_impl_head) as usize * 5
+                        + (!self.m_impl_head) as isize * 5
                         + if m_has_crc { 4 } else { 0 }) as f64
                         / (self.m_sf - 2 * m_ldro as usize) as f64)
-                        .ceil() as usize
-                        * (4 + m_cr);
+                        .ceil() as isize
+                        * (4 + m_cr as isize);
+                assert!(m_symb_numb_tmp >= 0, "Döner: computed negative symbol number");
+                self.m_symb_numb = m_symb_numb_tmp as usize;
                 self.m_received_head = true;
                 frame_info.insert(String::from("is_header"), Pmt::Bool(false));
                 frame_info.insert(String::from("symb_numb"), Pmt::Usize(self.m_symb_numb));
@@ -920,10 +922,10 @@ impl FrameSync {
         self.preamble_upchirps =
             volk_32fc_x2_multiply_32fc(&self.preamble_upchirps, &cfo_int_correc); // count: up_symb_to_use * m_number_of_bins
         // correct SFO in the preamble upchirps
-        /// SFO times symbol duration = number of samples we need to compensate the symbol duration by
+        // SFO times symbol duration = number of samples we need to compensate the symbol duration by
         self.sfo_hat = (m_cfo_int as f32 + self.m_cfo_frac as f32) * self.m_bw as f32
             / self.m_center_freq as f32;
-        /// CFO normalized to carrier frequency / SFO times t_samp
+        // CFO normalized to carrier frequency / SFO times t_samp
         let clk_off = self.sfo_hat / self.m_number_of_bins as f32;
         let fs = self.m_bw as f32;
         // we wanted f_c_true, got f_c_true+cfo_int+cfo_fraq -> f_c = f_c_true-cfo_int-cfo_fraq -> f_c = f_c_true - (cfo_int+cfo_fraq) -> normalized "clock offset" of f_c/f_c_true=1-(cfo_int+cfo_fraq)/f_c_true
@@ -1043,19 +1045,27 @@ impl FrameSync {
         );
         net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)].copy_from_slice(&tmp);
 
-        self.net_id[0] = FrameSync::get_symbol_val(
+        let net_id_0_tmp = FrameSync::get_symbol_val(
             &net_ids_samp_dec[0..self.m_number_of_bins],
             &self.m_downchirp,
-        )
-        .unwrap()
-        .try_into()
+        );
+        if net_id_0_tmp.is_none() {
+            warn!("Döner: encountered symbol with signal energy 0.0, aborting.");
+            self.reset();
+            return (items_to_consume, 0);
+        }
+        self.net_id[0] = net_id_0_tmp.unwrap().try_into()
         .expect("net-id can't be greater than SF bits, with SF<=12.");
-        self.net_id[1] = FrameSync::get_symbol_val(
+        let net_id_1_tmp = FrameSync::get_symbol_val(
             &net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)],
             &self.m_downchirp,
-        )
-        .unwrap()
-        .try_into()
+        );
+        if net_id_1_tmp.is_none() {
+                warn!("Döner: encountered symbol with signal energy 0.0, aborting.");
+                self.reset();
+                return (items_to_consume, 0);
+        }
+        self.net_id[1]  = net_id_1_tmp.unwrap().try_into()
         .expect("net-id can't be greater than SF bits, with SF<=12.");
         let mut one_symbol_off = false;
         let mut off_by_one_id = false;
@@ -1099,12 +1109,16 @@ impl FrameSync {
             // TODO does it make sense to require the netid to be known in this case, or is the matching offset enough to indicate we missed net_id[0] in the preamble?
             self.net_id[1] = self.net_id[0];
             let i = Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps - 1;
-            let net_id_1_tmp: u16 = FrameSync::get_symbol_val(
+            let net_id_1_tmp = FrameSync::get_symbol_val(
                 &corr_preamb[(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)],
                 &self.m_downchirp,
-            )
-            .unwrap()
-            .try_into()
+            );
+            if net_id_1_tmp.is_none() {
+                warn!("Döner: encountered symbol with signal energy 0.0, aborting.");
+                self.reset();
+                return (items_to_consume, 0);
+            }
+            let net_id_1_tmp: u16 = net_id_1_tmp.unwrap().try_into()
             .expect("net-id can't be greater than SF bits, with SF<=12.");
             if net_id_1_tmp & 0x07 != net_id_off_raw {
                 info!(
@@ -1379,8 +1393,9 @@ impl FrameSync {
 
             //   update sfo evolution
             // if cumulative SFO is greater than 1/2 sample duration
-            if self.sfo_cum.abs() > 1.0 / 2. / self.m_os_factor as f32 {
-                items_to_consume -= self.sfo_cum.signum() as isize;  // TODO why only use the sign bit? could it not be larger than 1.5 samples, making it necessary to compensate by more than 1?
+            assert!(self.sfo_cum.abs() <= 1.5 / self.m_os_factor as f32, "Döner: SFO is greater than one microsample {}", self.sfo_cum);
+            if self.sfo_cum.abs() > 0.5 / self.m_os_factor as f32 {
+                items_to_consume -= self.sfo_cum.signum() as isize;  // TODO why only use the sign bit? could it not be larger than 1.5 microsamples, making it necessary to compensate by more than 1?
                 self.sfo_cum -= self.sfo_cum.signum() / self.m_os_factor as f32;
             }
             self.sfo_cum += self.sfo_hat;
