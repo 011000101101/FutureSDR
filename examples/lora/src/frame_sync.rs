@@ -171,6 +171,11 @@ impl FrameSync {
         let (m_upchirp_tmp, m_downchirp_tmp) = build_ref_chirps(sf, 1); // vec![0; m_number_of_bins_tmp]
                                                                         // let (m_upchirp_tmp, m_downchirp_tmp) = build_ref_chirps(sf, os_factor); // TODO
 
+        let mut known_valid_net_ids: [[bool; 256]; 256] = [[false; 256]; 256];
+        known_valid_net_ids[sync_word_tmp[0]][sync_word_tmp[1]] = true;
+        let mut known_valid_net_ids_reverse: [[bool; 256]; 256] = [[false; 256]; 256];
+        known_valid_net_ids_reverse[sync_word_tmp[1]][sync_word_tmp[0]] = true;
+
         Block::new(
             BlockMetaBuilder::new("FrameSync").build(),
             StreamIoBuilder::new()
@@ -227,7 +232,7 @@ impl FrameSync {
                 ], //< vector of the oversampled network identifier samples
 
                 bin_idx: None,                 //< value of previous lora symbol
-                symbol_cnt: SyncState::NetId2, //< Number of symbols already received  // TODO NetId2
+                symbol_cnt: SyncState::NetId2, //< Number of symbols already received
                 k_hat: 0,                      //< integer part of CFO+STO
                 preamb_up_vals: vec![0; preamble_len_tmp - 3], //< value of the preamble upchirps
                 frame_cnt: 0,                  //< Number of frame received
@@ -262,8 +267,8 @@ impl FrameSync {
                 // m_should_log: false, //< indicate that the sync values should be logged
                 // off_by_one_id: f32  // local to work
                 tag_from_msg_handler_to_work_channel: mpsc::channel::<Pmt>(1),
-                known_valid_net_ids: [[false; 256]; 256],
-                known_valid_net_ids_reverse: [[false; 256]; 256],
+                known_valid_net_ids: known_valid_net_ids,
+                known_valid_net_ids_reverse: known_valid_net_ids_reverse,
                 net_id: [0; 2],
                 ready_to_detect: true,
             },
@@ -696,14 +701,16 @@ impl FrameSync {
                     ldro_mode_tmp
                 };
 
-                self.m_symb_numb = 8
-                    + ((2 * m_pay_len - self.m_sf
+                let m_symb_numb_tmp = 8_isize
+                    + ((2 * m_pay_len as isize - self.m_sf as isize
                         + 2
-                        + (!self.m_impl_head) as usize * 5
+                        + (!self.m_impl_head) as isize * 5
                         + if m_has_crc { 4 } else { 0 }) as f64
                         / (self.m_sf - 2 * m_ldro as usize) as f64)
-                        .ceil() as usize
-                        * (4 + m_cr);
+                        .ceil() as isize
+                        * (4 + m_cr as isize);
+                assert!(m_symb_numb_tmp >= 0, "Döner: computed negative symbol number");
+                self.m_symb_numb = m_symb_numb_tmp as usize;
                 self.m_received_head = true;
                 frame_info.insert(String::from("is_header"), Pmt::Bool(false));
                 frame_info.insert(String::from("symb_numb"), Pmt::Usize(self.m_symb_numb));
@@ -858,7 +865,7 @@ impl FrameSync {
         out: &mut [Complex32],
         nitems_to_process: usize,
     ) -> (isize, usize) {
-        let mut items_to_consume = 0;
+        let mut items_to_consume = 4;  // always consume the remaining four samples of the second NetId (except when the offsets added below become more negative than 1/4 symbol length), left over by the previous state as a buffer
         let mut items_to_output = 0;
         let mut sync_log_out: &mut [f32] = &mut [];
         let m_should_log = if sio.outputs().len() == 2 {
@@ -867,19 +874,28 @@ impl FrameSync {
         } else {
             false
         };
+        let offset = items_to_consume as usize; // currently assumed start of the quarter down symbol, which might in fact already be payload (first m_samples_per_symbol already filled in sync->Down2)
         let count = self.m_samples_per_symbol;
+        // requires self.m_samples_per_symbol samples in input buffer, but QuarterDown also needs 'backward' access to up to 3 samples for net-id re-synching when CFO is at minimum
         self.additional_symbol_samp[self.m_samples_per_symbol..(self.m_samples_per_symbol + count)]
-            .copy_from_slice(&input[0..count]);
+            .copy_from_slice(&input[offset..(offset+count)]);
         let m_cfo_int = if let Some(down_val) = self.down_val {
             // info!("down_val: {}", down_val);
+            // tuning CFO entails re-tuning STO (to not lose alignment of preamble upchirps) -> slope is normalized to 1 -> move half distance in frequency -> entails moving half distance in time -> aligns downchirp with sampling window, while keeping alignment of upchirps
+            // if CFO_int is 0, this check is perfectly aligned with the second downchirp.
+            // if it is less than 0, we have the full first downchirp before to still give a valid (modulated) downchirp
+            // if it is higher than one, we have a quarter upchirp ahead, which is enough, as we can only (or rather assume to) be misaligned by not more than 1/4 symbol in time at this point. (re-aligning by 1/4 t_sym in time entails shifting by 1/4 BW in freqeuncy, which shifts symbols by half in the observed window due to aliasing)
+            // otherwise we were off by more than 1/4 the BW in either direction, which is too much for this algorithm to compensate
             if down_val < self.m_number_of_bins / 2 {
                 down_val as isize / 2
             } else {
+                // if ahead by more than half a symbol, we are _probably_ actually behind by less than half a symbol
                 (down_val as isize - self.m_number_of_bins as isize) / 2
             }
         } else {
             panic!("self.down_val must not be None here.")
         };
+
         // info!("m_cfo_int: {}", m_cfo_int);
         let cfo_int_modulo = my_modulo(m_cfo_int, self.m_number_of_bins);
         // info!(
@@ -887,9 +903,13 @@ impl FrameSync {
         //     cfo_int_modulo
         // );
 
+        // *******
+        // re-estimate sto_frac and estimate SFO
+        // *******
         // correct STOint and CFOint in the preamble upchirps
+        // correct STOint
         self.preamble_upchirps.rotate_left(cfo_int_modulo);
-
+        // correct CFOint
         let cfo_int_correc: Vec<Complex32> = (0_usize
             ..((Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps)
                 * self.m_number_of_bins))
@@ -900,18 +920,24 @@ impl FrameSync {
                 )
             })
             .collect();
-
         self.preamble_upchirps =
             volk_32fc_x2_multiply_32fc(&self.preamble_upchirps, &cfo_int_correc); // count: up_symb_to_use * m_number_of_bins
-
         // correct SFO in the preamble upchirps
-
+        // SFO times symbol duration = number of samples we need to compensate the symbol duration by
+        // small, as m_cfo_int+self.m_cfo_frac bounded by ]-(self.m_number_of_bins/4+0.5),+(self.m_number_of_bins/4+0.5)[
+        // BW/s_f = 1/6400 @ 125kHz, 800mHz
+        // -> sfo_hat ~ ]-1/250,+1/250[
         self.sfo_hat = (m_cfo_int as f32 + self.m_cfo_frac as f32) * self.m_bw as f32
             / self.m_center_freq as f32;
+        // CFO normalized to carrier frequency / SFO times t_samp
         let clk_off = self.sfo_hat / self.m_number_of_bins as f32;
         let fs = self.m_bw as f32;
+        // we wanted f_c_true, got f_c_true+cfo_int+cfo_fraq -> f_c = f_c_true-cfo_int-cfo_fraq -> f_c = f_c_true - (cfo_int+cfo_fraq) -> normalized "clock offset" of f_c/f_c_true=1-(cfo_int+cfo_fraq)/f_c_true
+        // assume linear offset: we wanted BW, assume we got fs_p=BW-(cfo_int+cfo_fraq)/f_c_true*BW -> fs_p=BW*(1-(cfo_int+cfo_fraq)/f_c_true)
+        // compute actual sampling frequency fs_p to be able to compensate
         let fs_p = fs * (1. - clk_off);
         let n = self.m_number_of_bins;
+        // correct SFO
         let sfo_corr_vect: Vec<Complex32> = (0..((Into::<usize>::into(self.m_n_up_req)
             + self.additional_upchirps)
             * self.m_number_of_bins))
@@ -926,16 +952,14 @@ impl FrameSync {
                 )
             })
             .collect();
-
         let count = self.up_symb_to_use * self.m_number_of_bins;
         let tmp =
             volk_32fc_x2_multiply_32fc(&self.preamble_upchirps[0..count], &sfo_corr_vect[0..count]);
         self.preamble_upchirps[0..count].copy_from_slice(&tmp);
-
-        let tmp_sto_frac = self.estimate_sto_frac(); // better estimation of sto_frac in the beginning of the upchirps
-        let diff_sto_frac = self.m_sto_frac - tmp_sto_frac;
-
-        if diff_sto_frac.abs() <= (self.m_os_factor - 1) as f32 / self.m_os_factor as f32 {
+        // re-estimate sto_frac based on the now corrected self.preamble_upchirps to get better estimate than in the beginning of the upchirps
+        let tmp_sto_frac = self.estimate_sto_frac();
+        let diff_sto_frac = self.m_sto_frac - tmp_sto_frac; // both bounded by ]-0.5, 0.5] -> diff bounded by ]-1.0, 1.0[
+        if diff_sto_frac.abs() <= (self.m_os_factor - 1) as f32 / self.m_os_factor as f32 {  // TODO always prevents update if os_factor = 1
             // avoid introducing off-by-one errors by estimating fine_sto=-0.499 , rough_sto=0.499
             self.m_sto_frac = tmp_sto_frac;
         }
@@ -979,14 +1003,22 @@ impl FrameSync {
 
         // update sto_frac to its value at the beginning of the net id
         self.m_sto_frac += self.sfo_hat * self.m_preamb_len as f32;
-        // ensure that m_sto_frac is in [-0.5,0.5]
-        if self.m_sto_frac.abs() > 0.5 {
-            self.m_sto_frac += if self.m_sto_frac > 0. { -1. } else { 1. };
+        // ensure that m_sto_frac is in ]-0.5,0.5]
+        // STO_int is already at state of NetID 1 (due to re-synching via net_id), ignore additional int offset normally created by wrapping around the fractional offset
+        // TODO evaluate, original code actually ensures it is within [-0.5, 0.5]
+        // if self.m_sto_frac.abs() > 0.5 {
+        //     self.m_sto_frac += if self.m_sto_frac > 0. { -1. } else { 1. };
+        // }
+        if self.m_sto_frac * 2.0 > 1.0 {
+            self.m_sto_frac -= 1.0;
+        } else if self.m_sto_frac * 2.0 <= -1.0 {
+            self.m_sto_frac += 1.0;
         }
         // decim net id according to new sto_frac and sto int
-        // start_off gives the offset in the net_id_samp vector required to be aligned in time (CFOint is equivalent to STOint since upchirp_val was forced to 0)
+        // start_off gives the offset in the net_id_samp vector required to be aligned in time (CFOint is equivalent to STOint at this point, since upchirp_val was forced to 0, and initial alignment has already been performed. note that CFOint here is only the remainder of STOint that needs to be re-aligned.)
         let start_off = (self.m_os_factor as isize / 2
             - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
+            // self.m_number_of_bins as isize / 4 is manually introduced static NET_ID_1 start offset in array before CFO alignment to be able to align negative m_cfo_int offsets
             + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + m_cfo_int))
             as usize;
         // info!("self.m_os_factor / 2: {}", self.m_os_factor / 2);
@@ -1024,19 +1056,27 @@ impl FrameSync {
         );
         net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)].copy_from_slice(&tmp);
 
-        self.net_id[0] = FrameSync::get_symbol_val(
+        let net_id_0_tmp = FrameSync::get_symbol_val(
             &net_ids_samp_dec[0..self.m_number_of_bins],
             &self.m_downchirp,
-        )
-        .unwrap()
-        .try_into()
+        );
+        if net_id_0_tmp.is_none() {
+            warn!("Döner: encountered symbol with signal energy 0.0, aborting.");
+            self.reset();
+            return (items_to_consume, 0);
+        }
+        self.net_id[0] = net_id_0_tmp.unwrap().try_into()
         .expect("net-id can't be greater than SF bits, with SF<=12.");
-        self.net_id[1] = FrameSync::get_symbol_val(
+        let net_id_1_tmp = FrameSync::get_symbol_val(
             &net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)],
             &self.m_downchirp,
-        )
-        .unwrap()
-        .try_into()
+        );
+        if net_id_1_tmp.is_none() {
+                warn!("Döner: encountered symbol with signal energy 0.0, aborting.");
+                self.reset();
+                return (items_to_consume, 0);
+        }
+        self.net_id[1]  = net_id_1_tmp.unwrap().try_into()
         .expect("net-id can't be greater than SF bits, with SF<=12.");
         let mut one_symbol_off = false;
         let mut off_by_one_id = false;
@@ -1080,12 +1120,16 @@ impl FrameSync {
             // TODO does it make sense to require the netid to be known in this case, or is the matching offset enough to indicate we missed net_id[0] in the preamble?
             self.net_id[1] = self.net_id[0];
             let i = Into::<usize>::into(self.m_n_up_req) + self.additional_upchirps - 1;
-            let net_id_1_tmp: u16 = FrameSync::get_symbol_val(
+            let net_id_1_tmp = FrameSync::get_symbol_val(
                 &corr_preamb[(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)],
                 &self.m_downchirp,
-            )
-            .unwrap()
-            .try_into()
+            );
+            if net_id_1_tmp.is_none() {
+                warn!("Döner: encountered symbol with signal energy 0.0, aborting.");
+                self.reset();
+                return (items_to_consume, 0);
+            }
+            let net_id_1_tmp: u16 = net_id_1_tmp.unwrap().try_into()
             .expect("net-id can't be greater than SF bits, with SF<=12.");
             if net_id_1_tmp & 0x07 != net_id_off_raw {
                 info!(
@@ -1109,16 +1153,16 @@ impl FrameSync {
                 if m_should_log {
                     off_by_one_id = net_id_off != 0;
                 }
-                items_to_consume = -(self.m_os_factor as isize) * net_id_off as isize;
+                items_to_consume -= -(self.m_os_factor as isize) * net_id_off as isize;
                 // the first symbol was mistaken for the end of the downchirp. we should correct and output it.
-                let start_off = self.m_os_factor as isize / 2  // TODO check
+                let start_off = self.m_os_factor as isize / 2  // start half a sample delayed to have a buffer for the following STOfrac (of value +-1/2 sample) ->
                     - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
                     + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + m_cfo_int);
                 for i in (start_off..(self.m_samples_per_symbol as isize * 5 / 4))
                     .step_by(self.m_os_factor)
                 {
-                    assert!((i - start_off) >= 0);
-                    assert!(i >= 0); // TODO
+                    // assert!((i - start_off) >= 0);
+                    // assert!(i >= 0);  // first term of start_off >= 0, second term >= 0 (m_cfo_int >= -m_number_of_bins/4)
                     out[(i - start_off) as usize / self.m_os_factor] =
                         self.additional_symbol_samp[i as usize];
                 }
@@ -1132,7 +1176,9 @@ impl FrameSync {
             if m_should_log {
                 off_by_one_id = net_id_off != 0;
             }
-            items_to_consume = -(self.m_os_factor as isize) * net_id_off as isize;
+            // correct remaining offset in time only, as correction in frequency only necessary for estimating SFO (by first estimating CFO), and SFO is only estimated once per frame.
+            // can shift by additional 3 samples -> "buffer" (not zet consumed samples up to the beginning of the payload) needs to be |min(m_cfo_int)|+3 = m_samples_per_symbol/4+3 samples long
+            items_to_consume -= -(self.m_os_factor as isize) * net_id_off as isize;
             self.frame_cnt += 1;
             if !(self.known_valid_net_ids[self.net_id[0] as usize][self.net_id[1] as usize]) {
                 info!(
@@ -1144,65 +1190,72 @@ impl FrameSync {
         info!("SNR: {}dB", snr_est);
         // net IDs syntactically correct and matching offset => frame detected, proceed with trying to decode the header
         self.m_received_head = false;
+        // consume the quarter downchirp, and at the same time correct CFOint (already applied correction for NET_ID recovery was only in retrospect on a local buffer)
         items_to_consume +=
             self.m_samples_per_symbol as isize / 4 + self.m_os_factor as isize * m_cfo_int;
-        if items_to_consume <= nitems_to_process as isize {
-            // info!("Frame Detected!!!!!!!!!!");
-            // update sto_frac to its value at the payload beginning
-            self.m_sto_frac += self.sfo_hat * 4.25;
-            self.sfo_cum = ((self.m_sto_frac * self.m_os_factor as f32)
-                - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32) as f32)
-                / self.m_os_factor as f32;
-
-            let mut frame_info: HashMap<String, Pmt> = HashMap::new();
-
-            frame_info.insert(String::from("is_header"), Pmt::Bool(true));
-            frame_info.insert(String::from("cfo_int"), Pmt::F32(m_cfo_int as f32));
-            frame_info.insert(String::from("cfo_frac"), Pmt::F64(self.m_cfo_frac));
-            frame_info.insert(String::from("sf"), Pmt::Usize(self.m_sf));
-            let frame_info_pmt = Pmt::MapStrPmt(frame_info);
-
-            sio.output(0).add_tag(
-                0,
-                Tag::NamedAny("frame_info".to_string(), Box::new(frame_info_pmt)),
-            );
-            if one_symbol_off {
-                self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId2));
-            } else {
-                self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId1));
-            };
-            // let mut snr_est2: f32 = 0.;  // TODO unused
-
-            if m_should_log {
-                // estimate SNR
-
-                // for i in 0..self.up_symb_to_use {
-                //     snr_est2 += self.determine_snr(
-                //         &self.preamble_upchirps[(i * self.m_number_of_bins)
-                //             ..((i + 1) * self.m_number_of_bins)],
-                //     );
-                // }
-                // snr_est2 /= self.up_symb_to_use as f32;
-                let cfo_log = m_cfo_int as f32 + self.m_cfo_frac as f32;
-                let sto_log = (self.k_hat as isize - m_cfo_int) as f32 + self.m_sto_frac;
-                let srn_log = snr_est;
-                let sfo_log = self.sfo_hat;
-
-                sync_log_out[0] = srn_log;
-                sync_log_out[1] = cfo_log;
-                sync_log_out[2] = sto_log;
-                sync_log_out[3] = sfo_log;
-                sync_log_out[4] = if off_by_one_id { 1. } else { 0. };
-                sio.output(1).produce(5);
-            }
-            // #ifdef PRINT_INFO
-            //
-            //                         std::cout << "[frame_sync_impl.cc] " << frame_cnt << " CFO estimate: " << m_cfo_int + m_cfo_frac << ", STO estimate: " << k_hat - m_cfo_int + m_sto_frac << " snr est: " << snr_est << std::endl;
-            // #endif
-        } else {
-            self.reset();
-            return (0, 0);
+        assert!(items_to_consume <= nitems_to_process as isize, "must not happen, we already altered persistent state.");
+        //assert!(items_to_consume >= 0_isize, "must not happen, can not consume negative amount of samples. Implies net_id_off({net_id_off}) - m_cfo_int({m_cfo_int}) was greater than self.m_number_of_bins({})", self.m_number_of_bins);
+        // info!("Frame Detected!!!!!!!!!!");
+        // update sto_frac to its value at the payload beginning
+        // self.m_sto_frac can now be slightly outside ]-0.5,0.5] samples
+        self.m_sto_frac += self.sfo_hat * 4.25;
+        // STO_int (=k_hat - CFO_int) was last updated at start of netID -> shift sto_frac back into ]-0.5,0.5] range and add possible offset of one to STO_int (by consuming one sample more or less)
+        // TODO evaluate
+        if self.m_sto_frac * 2.0 > 1.0 {
+            self.m_sto_frac -= 1.0;
+            items_to_consume += 1;
+        } else if self.m_sto_frac * 2.0 <= -1.0 {
+            self.m_sto_frac += 1.0;
+            items_to_consume -= 1;
         }
+        self.sfo_cum = ((self.m_sto_frac * self.m_os_factor as f32)
+            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32) as f32)
+            / self.m_os_factor as f32;
+
+        let mut frame_info: HashMap<String, Pmt> = HashMap::new();
+
+        frame_info.insert(String::from("is_header"), Pmt::Bool(true));
+        frame_info.insert(String::from("cfo_int"), Pmt::F32(m_cfo_int as f32));
+        frame_info.insert(String::from("cfo_frac"), Pmt::F64(self.m_cfo_frac));
+        frame_info.insert(String::from("sf"), Pmt::Usize(self.m_sf));
+        let frame_info_pmt = Pmt::MapStrPmt(frame_info);
+
+        sio.output(0).add_tag(
+            0,
+            Tag::NamedAny("frame_info".to_string(), Box::new(frame_info_pmt)),
+        );
+        if one_symbol_off {
+            self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId2));
+        } else {
+            self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId1));
+        };
+
+        if m_should_log {
+            // estimate SNR
+
+            // for i in 0..self.up_symb_to_use {
+            //     snr_est2 += self.determine_snr(
+            //         &self.preamble_upchirps[(i * self.m_number_of_bins)
+            //             ..((i + 1) * self.m_number_of_bins)],
+            //     );
+            // }
+            // snr_est2 /= self.up_symb_to_use as f32;
+            let cfo_log = m_cfo_int as f32 + self.m_cfo_frac as f32;
+            let sto_log = (self.k_hat as isize - m_cfo_int) as f32 + self.m_sto_frac;
+            let srn_log = snr_est;
+            let sfo_log = self.sfo_hat;
+
+            sync_log_out[0] = srn_log;
+            sync_log_out[1] = cfo_log;
+            sync_log_out[2] = sto_log;
+            sync_log_out[3] = sfo_log;
+            sync_log_out[4] = if off_by_one_id { 1. } else { 0. };
+            sio.output(1).produce(5);
+        }
+        // #ifdef PRINT_INFO
+        //
+        //                         std::cout << "[frame_sync_impl.cc] " << frame_cnt << " CFO estimate: " << m_cfo_int + m_cfo_frac << ", STO estimate: " << k_hat - m_cfo_int + m_sto_frac << " snr est: " << snr_est << std::endl;
+        // #endif
         (items_to_consume, items_to_output)
     }
 
@@ -1322,6 +1375,9 @@ impl FrameSync {
                 let count = self.m_samples_per_symbol;
                 self.additional_symbol_samp[0..count].copy_from_slice(&input[0..count]);
                 self.transition_state(DecoderState::Sync, Some(SyncState::QuarterDown));
+                // do not consume the last four samples of the symbol yet, as we need an additional buffer in the following QarterDown state to cope with severely negative STO_int in combination with negative re-synching due to NetId offset and fractional STO <-0.5 due to SFO evolution
+                // also work only ensures that there is one full symbol plus these four in the input queue before calling the subfunctions, so by leaving 4 samples of the second downchirp, we will have 1/4 symbol time + 4 samples to sync backward, but also a full new symbol for the additional_symbol_samp buffer
+                (items_to_consume, items_to_output) = (self.m_samples_per_symbol as isize - 4, 0);
             }
             SyncState::QuarterDown => {
                 (items_to_consume, items_to_output) =
@@ -1357,9 +1413,12 @@ impl FrameSync {
             let mut items_to_consume = self.m_samples_per_symbol as isize;
 
             //   update sfo evolution
-            if self.sfo_cum.abs() > 1.0 / 2. / self.m_os_factor as f32 {
-                items_to_consume -= -2 * self.sfo_cum.signum() as isize + 1;
-                self.sfo_cum -= (-2. * self.sfo_cum.signum() + 1.) * 1.0 / self.m_os_factor as f32;
+            // if cumulative SFO is greater than 1/2 sample duration
+            assert!(self.sfo_cum.abs() <= 1.5 / self.m_os_factor as f32, "Döner: SFO is greater than one microsample {}", self.sfo_cum);
+            if self.sfo_cum.abs() > 0.5 / self.m_os_factor as f32 {
+                // sfo_cum starts out in range ]-0.5,0.5[ microsamples, sfo_hat is generally multiple orders of magnitude smaller than one microsample (at reasonable os_factors) -> sfo_cum can surpass the threshold, but not "overshoot" by more than one microsample -> it is sufficient to compensate by one microsample
+                items_to_consume -= self.sfo_cum.signum() as isize;
+                self.sfo_cum -= self.sfo_cum.signum() / self.m_os_factor as f32;
             }
             self.sfo_cum += self.sfo_hat;
             self.increase_symbol_count();
@@ -1469,15 +1528,15 @@ impl Kernel for FrameSync {
         // }
 
         if nitems_to_process < self.m_number_of_bins + 2
-            || nitems_to_process < self.m_samples_per_symbol
+            || nitems_to_process < self.m_samples_per_symbol + 4  // 4 additional samples to cope with demand of QuarterDown (4 samples "backward" and 1 symbol forward)
         {
             // TODO check, condition taken from self.forecast()
             return Ok(());
         }
         // downsampling
-        let indexing_offset = (self.m_os_factor as f32 / 2.
-            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32) as f32)
-            .trunc() as usize;
+        // m_sto_frac is bounded by [-0.5, 0.5[ -> indexing_offset [0, self.m_os_factor]
+        let indexing_offset = (self.m_os_factor / 2)
+            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32);
         self.in_down = input
             [indexing_offset..(indexing_offset + self.m_number_of_bins * self.m_os_factor)]
             .iter()
@@ -1497,7 +1556,8 @@ impl Kernel for FrameSync {
             DecoderState::Sync => self.sync(sio, input, out, nitems_to_process),
             DecoderState::SfoCompensation => self.compensate_sfo(sio, out),
         };
-        assert!(nitems_to_process >= items_to_consume as usize, "tried to consume {items_to_consume} samples, but input buffer only holds {nitems_to_process}."); // TODO was triggered detected syntactically correct net_id with matching offset 3
+        assert!(items_to_consume >= 0, "tried to consume negative amount of samples ({items_to_consume})");
+        assert!(nitems_to_process >= items_to_consume as usize, "tried to consume {items_to_consume} samples, but input buffer only holds {nitems_to_process}.");
         if items_to_consume > 0 {
             println!("consumed {} samples", items_to_consume);
             sio.input(0).consume(items_to_consume as usize);

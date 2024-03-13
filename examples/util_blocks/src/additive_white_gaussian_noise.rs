@@ -98,12 +98,12 @@ impl Kernel for AWGNComplex32 {
         if out.is_empty() {
             return Ok(());
         }
-        debug!("out buffer len: {}", out.len());
+        // debug!("out buffer len: {}", out.len());
 
         let input = sio.input(0).slice::<Complex32>();
         if input.len() > 0 {
             let mut rng = thread_rng();
-            debug!("received {} Complex32s", input.len());
+            // debug!("received {} Complex32s", input.len());
             // convert Complex32 to bytes
             let n_samples_to_produce = cmp::min(input.len(), out.len());
             if n_samples_to_produce > 0 {
@@ -111,7 +111,7 @@ impl Kernel for AWGNComplex32 {
                     out[i] = &input[i] + self.new_noise_sample(&mut rng);
                 }
                 sio.output(0).produce(n_samples_to_produce);
-                debug!("added white noise to {} samples.", n_samples_to_produce);
+                // debug!("added white noise to {} samples.", n_samples_to_produce);
             }
 
             if sio.input(0).finished() {

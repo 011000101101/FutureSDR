@@ -71,7 +71,7 @@ impl Kernel for AddCrc {
     ) -> Result<()> {
         let input = sio.input(0).slice::<u8>();
         let out = sio.output(0).slice::<u8>();
-        let noutput_items = max(0, out.len() - 4);
+        let noutput_items = out.len().saturating_sub(4);
         let mut nitems_to_process = min(input.len(), noutput_items);
         // info! {"AddCrc: Flag 1 - nitems_to_process: {}", nitems_to_process};
         // info! {"AddCrc: Flag 1 - noutput_items: {}", noutput_items};
