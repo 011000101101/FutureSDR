@@ -58,7 +58,7 @@ impl Kernel for Complex32Serializer {
         _mio: &mut MessageIo<Self>,
         _meta: &mut BlockMeta,
     ) -> Result<()> {
-        let mut out = sio.output(0).slice::<u8>();
+        let out = sio.output(0).slice::<u8>();
         if out.is_empty() {
             return Ok(());
         }
@@ -112,7 +112,7 @@ impl Kernel for Complex32Deserializer {
         _mio: &mut MessageIo<Self>,
         _meta: &mut BlockMeta,
     ) -> Result<()> {
-        let mut out = sio.output(0).slice::<Complex32>();
+        let out = sio.output(0).slice::<Complex32>();
         if out.is_empty() {
             return Ok(());
         }

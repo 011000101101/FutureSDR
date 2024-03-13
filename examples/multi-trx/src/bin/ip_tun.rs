@@ -2,7 +2,7 @@ use async_process::Command;
 use clap::Parser;
 use forky_tun::{self, Configuration};
 use std::collections::HashMap;
-use std::thread::sleep;
+// use std::thread::sleep;
 use std::time::Duration;
 // use futures::StreamExt;
 // use futures::sink::SinkExt;
@@ -17,13 +17,13 @@ use futuresdr::async_io::block_on;
 use futuresdr::async_io::Timer;
 // use futuresdr::async_net::SocketAddr;
 use futuresdr::async_net::UdpSocket;
-use futuresdr::blocks::Apply;
 use futuresdr::blocks::Combine;
 use futuresdr::blocks::Fft;
 use futuresdr::blocks::FftDirection;
 use futuresdr::blocks::MessagePipe;
 use futuresdr::blocks::Selector;
 use futuresdr::blocks::SelectorDropPolicy as DropPolicy;
+use futuresdr::blocks::{Apply, NullSink};
 // use futuresdr::blocks::SoapySinkBuilder;
 // use futuresdr::blocks::SoapySourceBuilder;
 use futuresdr::blocks::seify::SinkBuilder;
@@ -36,6 +36,7 @@ use futuresdr::futures::StreamExt;
 use futuresdr::log::debug;
 use futuresdr::log::info;
 use futuresdr::log::warn;
+use futuresdr::macros::connect;
 use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Flowgraph;
@@ -49,8 +50,8 @@ use seify::Direction::{Rx, Tx};
 
 use multitrx::MessageSelector;
 
-use multitrx::IPDSCPRewriter;
 use multitrx::MetricsReporter;
+use util_blocks::IPDSCPRewriter;
 
 use futuresdr::blocks::Delay as WlanDelay;
 use wlan::fft_tag_propagation as wlan_fft_tag_propagation;
@@ -72,13 +73,24 @@ use wlan::SyncLong as WlanSyncLong;
 use wlan::SyncShort as WlanSyncShort;
 use wlan::MAX_SYM;
 
-use zigbee::modulator as zigbee_modulator;
-use zigbee::parse_channel as zigbee_parse_channel;
-use zigbee::IqDelay as ZigbeeIqDelay;
-// use zigbee::Mac as ZigbeeMac;
-use multitrx::ZigbeeMac;
-use zigbee::ClockRecoveryMm as ZigbeeClockRecoveryMm;
-use zigbee::Decoder as ZigbeeDecoder;
+use lora::Decoder;
+use lora::Deinterleaver;
+use lora::FftDemod;
+use lora::FrameSync;
+use lora::GrayMapping;
+use lora::HammingDec;
+use lora::HeaderDecoder;
+use lora::HeaderMode;
+use lora::{AddCrc, GrayDemap, HammingEnc, Header, Interleaver, Modulate};
+use multitrx::Whitening;
+
+// use zigbee::modulator as zigbee_modulator;
+// use zigbee::parse_channel as zigbee_parse_channel;
+// use zigbee::IqDelay as ZigbeeIqDelay;
+// // use zigbee::Mac as ZigbeeMac;
+// use multitrx::ZigbeeMac;
+// use zigbee::ClockRecoveryMm as ZigbeeClockRecoveryMm;
+// use zigbee::Decoder as ZigbeeDecoder;
 
 // const PAD_FRONT: usize = 10000;
 // const PAD_TAIL: usize = 10000;
@@ -119,10 +131,10 @@ struct Args {
     #[clap(long, default_value_t = 50.0)]
     zigbee_tx_gain: f64,
     /// Zigbee RX Channel
-    #[clap(id = "zigbee-rx-channel", long, value_parser = zigbee_parse_channel)]
+    #[clap(id = "zigbee-rx-channel", long)]
     zigbee_rx_channel: Option<f64>,
     /// Zigbee TX Channel
-    #[clap(id = "zigbee-tx-channel", long, value_parser = zigbee_parse_channel)]
+    #[clap(id = "zigbee-tx-channel", long)]
     zigbee_tx_channel: Option<f64>,
     /// Zigbee Sample Rate
     #[clap(long, default_value_t = 4e6)]
@@ -201,6 +213,11 @@ struct Args {
 
 // const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 1122580;  // TODO maybe this
 const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 8 * MAX_ENCODED_BITS; // TODO maybe this
+                                                                                // const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize = 8192 * 4 * 8 * 16;
+const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize = 8192 * 4;
+
+const LORA_BW: usize = 500000;
+const LORA_SF: usize = 5;
 
 const DSCP_EF: u8 = 0b101110 << 2;
 const NUM_PROTOCOLS: usize = 2;
@@ -496,72 +513,152 @@ fn main() -> Result<()> {
     let (wlan_rxed_sender, mut wlan_rxed_frames) = mpsc::channel::<Pmt>(100);
     let wlan_message_pipe = fg.add_block(MessagePipe::new(wlan_rxed_sender));
     fg.connect_message(wlan_decoder, "rx_frames", wlan_message_pipe, "in")?;
-    // let wlan_blob_to_udp = fg.add_block(futuresdr::blocks::BlobToUdp::new("127.0.0.1:55555"));
-    // fg.connect_message(wlan_decoder, "rx_frames", wlan_blob_to_udp, "in")?;
     fg.connect_message(wlan_decoder, "rx_frames", metrics_reporter, "rx_wifi_in")?;
-    // let wlan_blob_to_udp = fg.add_block(futuresdr::blocks::BlobToUdp::new("127.0.0.1:55556"));
-    // fg.connect_message(wlan_decoder, "rftap", wlan_blob_to_udp, "in")?;
+
+    // connect!(
+    //         fg,
+    //     src_selector.out0 > wlan_delay > wlan_mult_conj.in1;
+    //     wlan_mult_conj > wlan_complex_avg > wlan_divide_mag.in0;
+    //     src_selector.out0 > wlan_complex_to_mag_2 > wlan_float_avg > wlan_divide_mag.in1;
+    //     wlan_divide_mag > wlan_sync_short.in_cor;
+    //     wlan_sync_short > wlan_sync_long > wlan_fft > wlan_frame_equalizer > wlan_decoder;
+    //     src_selector.out0 > wlan_mult_conj.in0;
+    //     wlan_delay > wlan_sync_short.in_sig;
+    //     wlan_complex_avg > wlan_sync_short.in_abs;
+    //     wlan_decoder.rx_frames | wlan_message_pipe;
+    //     wlan_decoder.rx_frames | metrics_reporter.rx_wifi_in;
+    //     );
+
+    // // ========================================
+    // // ZIGBEE RECEIVER
+    // // ========================================
+    // let mut last: Complex32 = Complex32::new(0.0, 0.0);
+    // let mut iir: f32 = 0.0;
+    // let alpha = 0.00016;
+    // let avg = fg.add_block(Apply::new(move |i: &Complex32| -> f32 {
+    //     let phase = (last.conj() * i).arg();
+    //     last = *i;
+    //     iir = (1.0 - alpha) * iir + alpha * phase;
+    //     phase - iir
+    // }));
+    //
+    // let omega = 2.0;
+    // let gain_omega = 0.000225;
+    // let mu = 0.5;
+    // let gain_mu = 0.03;
+    // let omega_relative_limit = 0.0002;
+    // let mm = fg.add_block(ZigbeeClockRecoveryMm::new(
+    //     omega,
+    //     gain_omega,
+    //     mu,
+    //     gain_mu,
+    //     omega_relative_limit,
+    // ));
+    //
+    // let zigbee_decoder = fg.add_block(ZigbeeDecoder::new(6));
+    // let zigbee_mac_block = ZigbeeMac::new();
 
     // ========================================
-    // ZIGBEE RECEIVER
+    // LoRa TRANSMITTER
     // ========================================
-    let mut last: Complex32 = Complex32::new(0.0, 0.0);
-    let mut iir: f32 = 0.0;
-    let alpha = 0.00016;
-    let avg = fg.add_block(Apply::new(move |i: &Complex32| -> f32 {
-        let phase = (last.conj() * i).arg();
-        last = *i;
-        iir = (1.0 - alpha) * iir + alpha * phase;
-        phase - iir
-    }));
 
-    let omega = 2.0;
-    let gain_omega = 0.000225;
-    let mu = 0.5;
-    let gain_mu = 0.03;
-    let omega_relative_limit = 0.0002;
-    let mm = fg.add_block(ZigbeeClockRecoveryMm::new(
-        omega,
-        gain_omega,
-        mu,
-        gain_mu,
-        omega_relative_limit,
-    ));
+    let impl_head = false;
+    let has_crc = true;
+    let cr = 3;
 
-    let zigbee_decoder = fg.add_block(ZigbeeDecoder::new(6));
-    let zigbee_mac_block = ZigbeeMac::new();
-    let zigbee_mac_queue_flush_input_port_id = zigbee_mac_block
+    let whitening = Whitening::new();
+    let header = Header::new(impl_head, has_crc, cr);
+    let add_crc = AddCrc::new(has_crc);
+    let hamming_enc = HammingEnc::new(cr, LORA_SF);
+    let interleaver = Interleaver::new(cr as usize, LORA_SF, 0, LORA_BW);
+    let gray_demap = GrayDemap::new(LORA_SF);
+    let modulate = Modulate::new(
+        LORA_SF,
+        LORA_BW as usize,
+        LORA_BW,
+        // vec![8, 16],
+        // vec![42, 12],
+        vec![42, 12],
+        // 20 * (1 << args.spreading_factor) * args.sample_rate as usize / args.bandwidth,
+        20 * (1 << LORA_SF) * LORA_BW / LORA_BW,
+        Some(8),
+    );
+
+    let zigbee_mac_queue_flush_input_port_id = whitening
         .message_input_name_to_id("flush_queue")
         .expect("No flush_queue port found!");
-    let zigbee_mac = fg.add_block(zigbee_mac_block);
     let (zigbee_rxed_sender, mut zigbee_rxed_frames) = mpsc::channel::<Pmt>(100);
-    let zigbee_message_pipe = fg.add_block(MessagePipe::new(zigbee_rxed_sender));
+    let zigbee_message_pipe = MessagePipe::new(zigbee_rxed_sender);
 
-    fg.connect_stream(src_selector, "out1", avg, "in")?;
-    fg.connect_stream(avg, "out", mm, "in")?;
-    fg.connect_stream(mm, "out", zigbee_decoder, "in")?;
-    fg.connect_message(zigbee_decoder, "out", zigbee_mac, "rx")?;
-    fg.connect_message(zigbee_mac, "rxed", zigbee_message_pipe, "in")?;
-    fg.connect_message(zigbee_mac, "rxed", metrics_reporter, "rx_in")?;
+    connect!(
+        fg,
+        whitening > header > add_crc > hamming_enc > interleaver > gray_demap
+        >
+        // modulate [Circular::with_size(LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST.max(LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME))] sink_selector.in1
+        modulate > sink_selector.in1
+    );
 
     // ========================================
-    // ZIGBEE TRANSMITTER
+    // LoRa RECEIVER
     // ========================================
 
-    //let zigbee_mac = fg.add_block(ZigbeeMac::new());
-    let zigbee_modulator = fg.add_block(zigbee_modulator());
-    let zigbee_iq_delay = fg.add_block(ZigbeeIqDelay::new());
+    let soft_decoding: bool = false;
+    // let downsample = FirBuilder::new_resampling::<Complex32, Complex32>(5, 8);
+    let frame_sync = FrameSync::new(
+        center_freq[1] as u32 + rx_freq_offset[1] as u32,
+        LORA_BW as u32,
+        LORA_SF,
+        false,
+        vec![42, 12],
+        1,
+        None,
+    );
+    let null_sink = NullSink::<f32>::new();
+    let fft_demod = FftDemod::new(soft_decoding, true, LORA_SF);
+    let gray_mapping = GrayMapping::new(soft_decoding);
+    let deinterleaver = Deinterleaver::new(soft_decoding);
+    let hamming_dec = HammingDec::new(soft_decoding);
+    let header_decoder = HeaderDecoder::new(HeaderMode::Explicit, false);
+    let decoder = Decoder::new();
 
-    fg.connect_stream(zigbee_mac, "out", zigbee_modulator, "in")?;
-    fg.connect_stream(zigbee_modulator, "out", zigbee_iq_delay, "in")?;
-    // fg.connect_stream(zigbee_iq_delay, "out", sink_selector, "in1")?;
-    fg.connect_stream_with_type(
-        zigbee_iq_delay,
-        "out",
-        sink_selector,
-        "in1",
-        Circular::with_size(LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST),
-    )?;
+    connect!(
+        fg,
+        src_selector.out1 [Circular::with_size(LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME)]
+        // src_selector.out1 >
+        frame_sync > fft_demod > gray_mapping > deinterleaver > hamming_dec > header_decoder;
+        frame_sync.log_out > null_sink;
+        header_decoder.frame_info | frame_sync.frame_info;
+        header_decoder | decoder;
+        decoder.crc_check | frame_sync.payload_crc_result;
+        decoder.data | zigbee_message_pipe;
+        decoder.data | metrics_reporter.rx_in;
+    );
+
+    // fg.connect_stream(src_selector, "out1", avg, "in")?;
+    // fg.connect_stream(avg, "out", mm, "in")?;
+    // fg.connect_stream(mm, "out", zigbee_decoder, "in")?;
+    // fg.connect_message(zigbee_decoder, "out", zigbee_mac, "rx")?;
+    // fg.connect_message(zigbee_mac, "rxed", zigbee_message_pipe, "in")?;
+    // fg.connect_message(zigbee_mac, "rxed", metrics_reporter, "rx_in")?;
+
+    // // ========================================
+    // // ZIGBEE TRANSMITTER
+    // // ========================================
+    //
+    // //let zigbee_mac = fg.add_block(ZigbeeMac::new());
+    // let zigbee_modulator = fg.add_block(zigbee_modulator());
+    // let zigbee_iq_delay = fg.add_block(ZigbeeIqDelay::new());
+    //
+    // fg.connect_stream(zigbee_mac, "out", zigbee_modulator, "in")?;
+    // fg.connect_stream(zigbee_modulator, "out", zigbee_iq_delay, "in")?;
+    // // fg.connect_stream(zigbee_iq_delay, "out", sink_selector, "in1")?;
+    // fg.connect_stream_with_type(
+    //     zigbee_iq_delay,
+    //     "out",
+    //     sink_selector,
+    //     "in1",
+    //     Circular::with_size(LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST),
+    // )?;
 
     // ========================================
     // MESSAGE INPUT SELECTOR
@@ -573,7 +670,7 @@ fn main() -> Result<()> {
         .expect("No output_selector port found!");
     let message_selector = fg.add_block(message_selector);
     fg.connect_message(message_selector, "out0", wlan_mac, "tx")?;
-    fg.connect_message(message_selector, "out1", zigbee_mac, "tx")?;
+    fg.connect_message(message_selector, "out1", whitening, "tx")?;
 
     // ========================================
     // FLOW PRIORITY TO IP DSCP MAPPER
@@ -705,7 +802,7 @@ fn main() -> Result<()> {
                         .await
                         .unwrap();
                 }
-                Err(err) => break,
+                Err(_) => break,
             }
         }
     });
@@ -863,7 +960,7 @@ fn main() -> Result<()> {
                             block_on(
                                 input_handle
                                     .call(
-                                    zigbee_mac,
+                                    whitening,
                                     zigbee_mac_queue_flush_input_port_id,
                                     Pmt::Null,
                                 )

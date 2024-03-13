@@ -17,7 +17,7 @@ use futuresdr::runtime::{Block, Pmt};
 use rand::prelude::{thread_rng, ThreadRng};
 use rand_distr::{Distribution, Normal, Uniform};
 use std::cmp;
-use std::f32::consts::{PI, SQRT_2};
+use std::f32::consts::PI;
 
 // use std::any::TypeId;
 // use std::num::FpCategory::Normal;
@@ -94,7 +94,7 @@ impl Kernel for AWGNComplex32 {
         _mio: &mut MessageIo<Self>,
         _meta: &mut BlockMeta,
     ) -> Result<()> {
-        let mut out = sio.output(0).slice::<Complex32>();
+        let out = sio.output(0).slice::<Complex32>();
         if out.is_empty() {
             return Ok(());
         }

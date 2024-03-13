@@ -27,7 +27,7 @@ pub struct Header {
     m_cnt_header_nibbles: usize, // count the number of explicit header nibbles output
     m_header: [u8; 5],           // contain the header to prepend
     m_tag_payload_len: usize,
-    m_tag_payload_str: String,
+    m_tag_payload_str: Vec<u8>,
 }
 
 impl Header {
@@ -45,7 +45,7 @@ impl Header {
                 m_impl_head: impl_head,
                 m_header: [0; 5],
                 m_tag_payload_len: 0,
-                m_tag_payload_str: String::new(),
+                m_tag_payload_str: vec![],
                 m_cnt_header_nibbles: 0,
                 m_payload_len: 0, // implicit
                 m_cnt_nibbles: 0,
@@ -92,8 +92,8 @@ impl Kernel for Header {
                 self.m_tag_payload_len =
                     self.m_payload_len * 2 + if self.m_impl_head { 0 } else { 5 }; // 5 being the explicit header length
 
-                let mut tags_tmp: Vec<(usize, String)> =
-                    get_tags_in_window::<String>(sio.input(0).tags(), 1, "payload_str");
+                let mut tags_tmp: Vec<(usize, Vec<u8>)> =
+                    get_tags_in_window::<Vec<u8>>(sio.input(0).tags(), 1, "payload_str");
                 // info! {"Header: {:?}", tags_tmp};
                 self.m_cnt_nibbles = 0;
                 assert!(tags_tmp.len() == 1);
@@ -150,7 +150,7 @@ impl Kernel for Header {
                         0,
                         Tag::NamedAny(
                             "payload_str".to_string(),
-                            Box::new(Pmt::String(self.m_tag_payload_str.clone())),
+                            Box::new(Pmt::Blob(self.m_tag_payload_str.clone())),
                         ),
                     );
                 }
@@ -177,7 +177,7 @@ impl Kernel for Header {
                     0,
                     Tag::NamedAny(
                         "payload_str".to_string(),
-                        Box::new(Pmt::String(self.m_tag_payload_str.clone())),
+                        Box::new(Pmt::Blob(self.m_tag_payload_str.clone())),
                     ),
                 );
             }

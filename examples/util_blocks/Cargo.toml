@@ -1,5 +1,5 @@
 [package]
-name = "lora"
+name = "util_blocks"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,42 +7,18 @@ edition = "2021"
 
 [workspace]
 
-[[bin]]
-name = "rx_from_file"
-path = "src/bin/rx_from_file.rs"
-
-[[bin]]
-name = "loopback_sw"
-path = "src/bin/loopback_sw.rs"
-
-[[bin]]
-name = "loopback"
-path = "src/bin/loopback.rs"
-
-[[bin]]
-name = "rx_to_file"
-path = "src/bin/rx_to_file.rs"
-
-[[bin]]
-name = "rx_pfb"
-path = "src/bin/rx_pfb.rs"
-
-[[bin]]
-name = "rx"
-path = "src/bin/rx.rs"
-
-[[bin]]
-name = "tx"
-path = "src/bin/tx.rs"
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 clap = { version = "4.4.0", features = ["derive"] }
 futuresdr = { path = "../..", features = ["seify"] }
 futuredsp = { path = "../../crates/futuredsp" }
-util_blocks = { path = "../util_blocks" }
 seify = { version = ">=0.9.0", features = ["aaronia_http"] }
 rustfft = "6.1.0"
 ordered-float = "3.9.1"
 scilib = "1.0.0"
 num-traits = "0.2"
 chrono = "0.4.33"
+rand = "0.8.5"
+rand_distr = "0.4.3"

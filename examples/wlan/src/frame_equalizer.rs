@@ -1,5 +1,3 @@
-use futuresdr::log::warn;
-
 use crate::Mcs;
 use crate::Modulation;
 use crate::ViterbiDecoder;
@@ -8,7 +6,7 @@ use crate::POLARITY;
 use crate::{FrameParam, MAX_PAYLOAD_SIZE};
 
 use futuresdr::anyhow::Result;
-use futuresdr::log::{debug, info};
+use futuresdr::log::debug;
 use futuresdr::macros::async_trait;
 use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::Block;

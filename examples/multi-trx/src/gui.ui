@@ -18,7 +18,7 @@
     <item>
      <widget class="QTabWidget" name="tabWidget_2">
       <property name="currentIndex">
-       <number>0</number>
+       <number>6</number>
       </property>
       <widget class="QWidget" name="tab_3">
        <attribute name="title">
@@ -1102,7 +1102,7 @@
           <item>
            <widget class="QRadioButton" name="radio_button_zigbee">
             <property name="text">
-             <string>ZigBee</string>
+             <string>LoRa</string>
             </property>
            </widget>
           </item>
@@ -1530,7 +1530,7 @@
             </widget>
             <widget class="QWidget" name="tab_2">
              <attribute name="title">
-              <string>ZigBee</string>
+              <string>LoRa</string>
              </attribute>
              <layout class="QVBoxLayout" name="verticalLayout_5" stretch="3,5,5,3">
               <property name="spacing">

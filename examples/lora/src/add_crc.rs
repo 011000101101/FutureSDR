@@ -20,7 +20,7 @@ use futuresdr::runtime::{Block, ItemTag};
 
 pub struct AddCrc {
     m_has_crc: bool,      //indicate the presence of a payload CRC
-    m_payload: Vec<char>, // payload data
+    m_payload: Vec<u8>,   // payload data
     m_payload_len: usize, // length of the payload in Bytes
     m_frame_len: usize,   // length of the frame in number of gnuradio items
     m_cnt: usize,         // counter of the number of symbol in frame
@@ -75,7 +75,7 @@ impl Kernel for AddCrc {
         let mut nitems_to_process = min(input.len(), noutput_items);
         // info! {"AddCrc: Flag 1 - nitems_to_process: {}", nitems_to_process};
         // info! {"AddCrc: Flag 1 - noutput_items: {}", noutput_items};
-        let tags: Vec<(usize, String)> = sio
+        let tags: Vec<(usize, Vec<u8>)> = sio
             .input(0)
             .tags()
             .iter()
@@ -86,7 +86,7 @@ impl Kernel for AddCrc {
                 } => {
                     if n == "payload_str" {
                         match (**val).downcast_ref().unwrap() {
-                            Pmt::String(payload) => Some((*index, payload.clone())),
+                            Pmt::Blob(payload) => Some((*index, payload.clone())),
                             _ => None,
                         }
                     } else {
@@ -106,7 +106,7 @@ impl Kernel for AddCrc {
                     nitems_to_process = min(tags[1].0, noutput_items);
                     // info! {"AddCrc: Flag 3 - nitems_to_process: {}", nitems_to_process};
                 }
-                self.m_payload = tags[0].1.chars().collect();
+                self.m_payload = tags[0].1.clone();
                 //pass tags downstream
                 if nitems_to_process > 0 {
                     let tags_tmp: Vec<(usize, usize)> = sio
@@ -162,7 +162,7 @@ impl Kernel for AddCrc {
             self.m_payload_len = self.m_payload.len();
             //calculate CRC on the N-2 firsts data bytes using Poly=1021 Init=0000
             for i in 0..(self.m_payload_len - 2) {
-                crc = Self::crc16(crc, self.m_payload[i] as u8);
+                crc = Self::crc16(crc, self.m_payload[i]);
             }
             //XOR the obtained CRC with the last 2 data bytes
             crc = crc

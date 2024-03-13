@@ -44,10 +44,12 @@ path = "src/bin/ip_tun.rs"
 [dependencies]
 clap = { version = "3.1.18", features = ["derive"] }
 soapysdr = { version = "0.3.2", optional = true }
-futuresdr = { path = "../..", features = ["aaronia_http", "soapy"]}
+futuresdr = { path = "../..", features = ["aaronia_http", "soapy"] }
 #futuredsp = { path = "../../futuredsp", version = "0.0.6" }
-zigbee = { path = "../zigbee"}
-wlan = { path = "../wlan"}
+zigbee = { path = "../zigbee" }
+lora = { path = "../lora" }
+wlan = { path = "../wlan" }
+util_blocks = { path = "../util_blocks" }
 atty = "0.2"
 forky-tun = { version = "0.5.5", features = ["async"] }
 packet = "0.1.4"

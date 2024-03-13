@@ -23,7 +23,8 @@ import struct
 import cmath
 import signal
 from threading import Lock
-from channel_models import get_station_z, distance, calculate_paths_freespace, calculate_paths_two_ray, calculate_paths_ce2r, calculate_paths_9ray_suburban
+from channel_models import get_station_z, distance, calculate_paths_freespace, calculate_paths_two_ray, \
+    calculate_paths_ce2r, calculate_paths_9ray_suburban
 
 DATAPOINTS_LOCK = Lock()
 
@@ -93,10 +94,11 @@ LAMBDA: float = SPEED_OF_LIGHT / 2.45e9
 # EPSILON_R: float = 1.02
 DELAY_PER_TAP_NS = 5  # 1 / 200e6 seconds
 
+
 def combine_paths(paths: List[Tuple[float, float, float]]) -> float:
-    total_gain = 0+0j
+    total_gain = 0 + 0j
     for loss_linear, delay, additional_phase_shift in paths:
-        phase_offset = np.exp((2 * np.pi * delay * FREQUENCY + additional_phase_shift) * (0+1j));
+        phase_offset = np.exp((2 * np.pi * delay * FREQUENCY + additional_phase_shift) * (0 + 1j));
         if loss_linear >= 1:
             partial_gain = 1 / loss_linear
         else:
@@ -162,7 +164,8 @@ class MyFigureCanvas(FigureCanvas):
                 fill_colour = kwargs["fill_color"]
             except KeyError:
                 fill_colour = 0
-            if colour == self._colours[-1] and linestyle == self._linestyles[-1] and fill == self._fills[-1] and fill_colour == self._fill_colours[-1]:
+            if colour == self._colours[-1] and linestyle == self._linestyles[-1] and fill == self._fills[
+                -1] and fill_colour == self._fill_colours[-1]:
                 # extend last line segment
                 self._y_segments[-1].append(round(val, 4))  # Add new datapoint
             else:
@@ -216,8 +219,6 @@ class MyFigureCanvas(FigureCanvas):
                         color=c, alpha=0.3
                     ))
 
-
-
     def __init__(
             self, x_len: int, interval: int, data_getter_callback: callable,
             y_range: Optional[list], y_label: Optional[str] = None, y_label_pad: int = 0, small: Optional[bool] = False,
@@ -237,7 +238,7 @@ class MyFigureCanvas(FigureCanvas):
         self._y_range_ = y_range
         self.data_getter_callback = data_getter_callback
 
-        self.prev_val = (0, ) * num_lines
+        self.prev_val = (0,) * num_lines
 
         # Store a figure ax
         self._ax_ = self.figure.subplots()
@@ -429,10 +430,14 @@ class Ui(QtWidgets.QMainWindow):
         else:
             self.magic_scaling_factor_send.clicked.connect(self.send_magic_scaling_factor)
 
-        self.get_datapoint_rate_ag = partial(self.get_datapoint_data_rate, receiver=('192.168.42.10', 'rx'), sender=('192.168.42.11', 'tx'))
-        self.get_datapoint_rate_ga = partial(self.get_datapoint_data_rate, receiver=('192.168.42.11', 'rx'), sender=('192.168.42.10', 'tx'))
-        self.get_datapoint_delivery_rate_ag = partial(self.get_datapoint_delivery_rate, (('192.168.42.10', 'rx'), ('192.168.42.11', 'tx')))
-        self.get_datapoint_delivery_rate_ga = partial(self.get_datapoint_delivery_rate, (('192.168.42.11', 'rx'), ('192.168.42.10', 'tx')))
+        self.get_datapoint_rate_ag = partial(self.get_datapoint_data_rate, receiver=('192.168.42.10', 'rx'),
+                                             sender=('192.168.42.11', 'tx'))
+        self.get_datapoint_rate_ga = partial(self.get_datapoint_data_rate, receiver=('192.168.42.11', 'rx'),
+                                             sender=('192.168.42.10', 'tx'))
+        self.get_datapoint_delivery_rate_ag = partial(self.get_datapoint_delivery_rate,
+                                                      (('192.168.42.10', 'rx'), ('192.168.42.11', 'tx')))
+        self.get_datapoint_delivery_rate_ga = partial(self.get_datapoint_delivery_rate,
+                                                      (('192.168.42.11', 'rx'), ('192.168.42.10', 'tx')))
         self.get_datapoint_rate_combined = self.get_datapoint_data_rate_combined
 
         self.workers = [
@@ -447,7 +452,8 @@ class Ui(QtWidgets.QMainWindow):
             y_label="Data Rate (kB/s)\n\nPrio <-|-> Normal                       ", y_label_pad=-15,
             num_lines=5, y_ticks=([-0.25, 0, 0.25, 0.5], ["0.25", "0", "0.25", "0.5"]),
             legend=({
-                "handles": [Line2D((0,), (0,), linestyle='--', c='black'), Line2D((0,), (0,), linestyle='-', c='black')],
+                "handles": [Line2D((0,), (0,), linestyle='--', c='black'),
+                            Line2D((0,), (0,), linestyle='-', c='black')],
                 "labels": ['sent', 'received'],
                 "loc": "upper left",
                 "bbox_to_anchor": (0.095, 0.95)
@@ -479,7 +485,8 @@ class Ui(QtWidgets.QMainWindow):
             y_label_pad=-5,
             num_lines=5, y_ticks=([-4, 0, 4, 8, 16, 24, 32, 40], ["4", "0", "4", "8", "16", "24", "32", "40"]),
             legend=({
-                "handles": [Line2D((0,), (0,), linestyle='--', c='black'), Line2D((0,), (0,), linestyle='-', c='black')],
+                "handles": [Line2D((0,), (0,), linestyle='--', c='black'),
+                            Line2D((0,), (0,), linestyle='-', c='black')],
                 "labels": ['sent', 'received'],
                 "loc": "upper left",
                 "bbox_to_anchor": (0.095, 0.95)
@@ -523,7 +530,8 @@ class Ui(QtWidgets.QMainWindow):
             small=True,
             y_label="Delivery Rate", num_lines=2,
             legend=({
-                "handles": [Line2D((0,), (0,), linestyle='--', c='black'), Line2D((0,), (0,), linestyle=':', c='black')],
+                "handles": [Line2D((0,), (0,), linestyle='--', c='black'),
+                            Line2D((0,), (0,), linestyle=':', c='black')],
                 "labels": ['GA', 'AG'],
                 "loc": "upper left",
                 "bbox_to_anchor": (0.12, 0.95)
@@ -581,12 +589,12 @@ class Ui(QtWidgets.QMainWindow):
         self.layout_canvas_path_loss_9r.addWidget(self.plot_path_loss_9r)
         self.plot_path_loss_manual = MyFigureCanvas(
             x_len=120, y_range=[-MAX_PATH_LOSS_FOR_PLOTTING, 0], interval=PLOTTING_INTERVAL_MS,
-            data_getter_callback=lambda: (-self.manual_path_loss_value, ),
+            data_getter_callback=lambda: (-self.manual_path_loss_value,),
             y_label="Path Loss (dB)"
         )
         self.plot_path_loss_manual_small = MyFigureCanvas(
             x_len=60, y_range=[-MAX_PATH_LOSS_FOR_PLOTTING, 0], interval=PLOTTING_INTERVAL_MS,
-            data_getter_callback=lambda: (-self.manual_path_loss_value, ),
+            data_getter_callback=lambda: (-self.manual_path_loss_value,),
             small=True,
             y_label="Path Loss (dB)"
         )
@@ -612,7 +620,7 @@ class Ui(QtWidgets.QMainWindow):
         self.canvas_small_distance.addWidget(self.plot_position_distance_small)
         self.plot_position_height = MyFigureCanvas(
             x_len=120, y_range=[0, 100], interval=PLOTTING_INTERVAL_MS,
-            data_getter_callback=lambda: (self.uav_pos[2], ),
+            data_getter_callback=lambda: (self.uav_pos[2],),
             y_label="Height (m)"
         )
         self.layout_canvas_height.addWidget(self.plot_position_height)
@@ -622,7 +630,7 @@ class Ui(QtWidgets.QMainWindow):
             data_getter_callback=lambda: self.get_datapoint_taps_for_plotting()[0],
             y_label="Real Response", x_label="Time (ns)",
             x_tick_label=[str(round((x * DELAY_PER_TAP_NS), 2)) if x % 10 == 0 else None for x in range(41)],
-            y_scale='symlog', base=10, linthresh=1/2**15
+            y_scale='symlog', base=10, linthresh=1 / 2 ** 15
         )
         self.canvas_taps_amplitude.addWidget(self.plot_taps_amplitude)
         self.plot_taps_phase = MyBarFigureCanvas(
@@ -631,7 +639,7 @@ class Ui(QtWidgets.QMainWindow):
             # y_ticks=([0, 0.5 * np.pi, np.pi, 1.5 * np.pi, 2 * np.pi], ["", "π/2", "π", "3π/2", "2π"]),
             y_label="Imaginary Response", x_label="Time (ns)",
             x_tick_label=[str(round((x * DELAY_PER_TAP_NS), 2)) if x % 10 == 0 else None for x in range(41)],
-            y_scale='symlog', base=10, linthresh=1/2**15
+            y_scale='symlog', base=10, linthresh=1 / 2 ** 15
         )
         self.canvas_taps_phase.addWidget(self.plot_taps_phase)
 
@@ -740,7 +748,7 @@ class Ui(QtWidgets.QMainWindow):
                 center_freq=int(2.45e9), rx_freq_offset=(-4_000_000, -4_000_000),
                 tx_freq_offset=(-4_000_000, -4_000_000),
                 rx_gain=(10, 10), tx_gain=(10, 10),
-                sample_rate=(4_000_000, 4_000_000),
+                sample_rate=(4_000_000, 500_000),
                 rx_device_channel=0,
                 tx_device_channel=1,
             )
@@ -840,7 +848,8 @@ class Ui(QtWidgets.QMainWindow):
                 in self.datapoints[sender]
             ]
             tx_only = [sample for sample, timed_out in zip(self.datapoints[sender], tx_timed_out) if timed_out]
-            self.datapoints[sender] = [sample for sample, timed_out in zip(self.datapoints[sender], tx_timed_out) if not timed_out]
+            self.datapoints[sender] = [sample for sample, timed_out in zip(self.datapoints[sender], tx_timed_out) if
+                                       not timed_out]
             for rx in self.datapoints[receiver]:
                 try:
                     matching_tx = [
@@ -850,7 +859,7 @@ class Ui(QtWidgets.QMainWindow):
                         if sample[0] < rx[0] and sample[1] == rx[1] and sample[4] == rx[4]
                     ]
                     # if len(matching_tx) > 1 and direction == 'GA':
-                        # print(f"{direction} multiple mathces possible: {len(matching_tx)}.")
+                    # print(f"{direction} multiple mathces possible: {len(matching_tx)}.")
                     matching_tx = matching_tx[0]
                     delay_tmp = rx[0] - matching_tx[0]
                     # if delay_tmp > 1:
@@ -873,9 +882,10 @@ class Ui(QtWidgets.QMainWindow):
                     (prioritized and sample[2] > 0)
                     or
                     (not prioritized and sample[2] == 0)
-                )
+            )
             )) / (PLOTTING_INTERVAL_MS / 1_000)
             return bytes_sum / 1024
+
         # ({sum((size for _, size, _, _, _ in tx_only))} bytes)
         # print(f"{direction}: {len(tx_only)} packages lost (of {len(tx_only) + len(tx_rx)}).")
         # print(f"{direction}: avg delay {delay}s.")
@@ -890,19 +900,24 @@ class Ui(QtWidgets.QMainWindow):
             get_kilobytes_per_second(tx_only, True) - get_kilobytes_per_second(rx_only, True),
             get_kilobytes_per_second(tx_rx, False) + get_kilobytes_per_second(rx_only, False),
             get_kilobytes_per_second(tx_only, False) - get_kilobytes_per_second(rx_only, False),
-            (len(tx_rx) + len(rx_only)) / (len(tx_only) + len(tx_rx) + len(rx_only)) if len(tx_only) > 0 or len(tx_rx) > 0 or len(rx_only) > 0 else 0,
+            (len(tx_rx) + len(rx_only)) / (len(tx_only) + len(tx_rx) + len(rx_only)) if len(tx_only) > 0 or len(
+                tx_rx) > 0 or len(rx_only) > 0 else 0,
             delay
         )
 
     def track_tx_rx(self):
-        self._latest_data_rate_values_ag.append(self.compute_data_rate(('192.168.42.10', 'rx'), ('192.168.42.11', 'tx')))
-        self._latest_data_rate_values_ga.append(self.compute_data_rate(('192.168.42.11', 'rx'), ('192.168.42.10', 'tx')))
+        self._latest_data_rate_values_ag.append(
+            self.compute_data_rate(('192.168.42.10', 'rx'), ('192.168.42.11', 'tx')))
+        self._latest_data_rate_values_ga.append(
+            self.compute_data_rate(('192.168.42.11', 'rx'), ('192.168.42.10', 'tx')))
         if len(self._latest_data_rate_values_ag) > RATE_SMOOTHING_FACTOR:
             self._latest_data_rate_values_ag = self._latest_data_rate_values_ag[1:]
         if len(self._latest_data_rate_values_ga) > RATE_SMOOTHING_FACTOR:
             self._latest_data_rate_values_ga = self._latest_data_rate_values_ga[1:]
-        self.latest_data_rate_values_ag = [sum(samples) / len(self._latest_data_rate_values_ag) for samples in zip(*self._latest_data_rate_values_ag)]
-        self.latest_data_rate_values_ga = [sum(samples) / len(self._latest_data_rate_values_ga) for samples in zip(*self._latest_data_rate_values_ga)]
+        self.latest_data_rate_values_ag = [sum(samples) / len(self._latest_data_rate_values_ag) for samples in
+                                           zip(*self._latest_data_rate_values_ag)]
+        self.latest_data_rate_values_ga = [sum(samples) / len(self._latest_data_rate_values_ga) for samples in
+                                           zip(*self._latest_data_rate_values_ga)]
 
     def get_datapoint_data_rate(self, receiver: tuple[str, str], sender: tuple[str, str]):
         if receiver[0] == '192.168.42.10':
@@ -912,10 +927,10 @@ class Ui(QtWidgets.QMainWindow):
         color = 0 if self.radio_button_wifi.isChecked() else 1
         return (
             (0, {"color": 'black', "linestyle": '-'}),
-            (-val[0], {"color": color, "linestyle": '-', "fill" : True, "fill_color": color}),
-            (-val[1]-val[0], {"color": color, "linestyle": '--'}),
-            (val[2], {"color": color, "linestyle": '-', "fill" : True, "fill_color": color}),
-            (val[3]+val[2], {"color": color, "linestyle": '--'})
+            (-val[0], {"color": color, "linestyle": '-', "fill": True, "fill_color": color}),
+            (-val[1] - val[0], {"color": color, "linestyle": '--'}),
+            (val[2], {"color": color, "linestyle": '-', "fill": True, "fill_color": color}),
+            (val[3] + val[2], {"color": color, "linestyle": '--'})
         )
 
     def get_datapoint_data_rate_combined(self):
@@ -937,17 +952,19 @@ class Ui(QtWidgets.QMainWindow):
             val = self.latest_data_rate_values_ga[4]
         val = min(val, 1.0)
         colour = 0 if self.radio_button_wifi.isChecked() else 1
-        return ((val, {"color": colour}), )
+        return ((val, {"color": colour}),)
 
     def get_datapoint_delivery_rate_combined(self):
         colour = 0 if self.radio_button_wifi.isChecked() else 1
         return (
-            (self.get_datapoint_delivery_rate((('192.168.42.10', 'rx'), ('192.168.42.11', 'tx')))[0][0], {"color": colour, "linestyle": ':', "label": "ag"}),
-            (self.get_datapoint_delivery_rate((('192.168.42.11', 'rx'), ('192.168.42.10', 'tx')))[0][0], {"color": colour, "linestyle": '--', "label": "ga"})
+            (self.get_datapoint_delivery_rate((('192.168.42.10', 'rx'), ('192.168.42.11', 'tx')))[0][0],
+             {"color": colour, "linestyle": ':', "label": "ag"}),
+            (self.get_datapoint_delivery_rate((('192.168.42.11', 'rx'), ('192.168.42.10', 'tx')))[0][0],
+             {"color": colour, "linestyle": '--', "label": "ga"})
         )
 
     def get_datapoint_distance(self):
-        return (np.linalg.norm(self.uav_pos - np.array((0, 0, get_station_z()))), )
+        return (np.linalg.norm(self.uav_pos - np.array((0, 0, get_station_z()))),)
 
     @staticmethod
     # def path_loss_fs(d: float) -> float:
@@ -956,13 +973,12 @@ class Ui(QtWidgets.QMainWindow):
     #     else:
     #         return -20. * np.log10(4. * np.pi * (d / LAMBDA))
 
-
     @staticmethod
     def path_loss_fs(x, y, z) -> float:
         return combine_paths(calculate_paths_freespace(x, y, z))
 
     def get_datapoint_pl_fs(self):
-        return (self.path_loss_fs(self.uav_pos[0], self.uav_pos[1], self.uav_pos[2]), )
+        return (self.path_loss_fs(self.uav_pos[0], self.uav_pos[1], self.uav_pos[2]),)
 
     # @staticmethod
     # def distance(x, y, z):
@@ -993,21 +1009,21 @@ class Ui(QtWidgets.QMainWindow):
         return combine_paths(calculate_paths_two_ray(x, y, z))
 
     def get_datapoint_pl_fe2r(self):
-        return (self.path_loss_fe_2r(self.uav_pos[0], self.uav_pos[1], self.uav_pos[2]), )
+        return (self.path_loss_fe_2r(self.uav_pos[0], self.uav_pos[1], self.uav_pos[2]),)
 
     @staticmethod
     def path_loss_ce_2r(x: float, y: float, z: float) -> float:
         return combine_paths(calculate_paths_ce2r(x, y, z))
 
     def get_datapoint_pl_ce2r(self):
-        return (self.path_loss_ce_2r(self.uav_pos[0], self.uav_pos[1], self.uav_pos[2]), )
+        return (self.path_loss_ce_2r(self.uav_pos[0], self.uav_pos[1], self.uav_pos[2]),)
 
     @staticmethod
     def path_loss_9ray_suburban(x: float, y: float, z: float) -> float:
         return combine_paths(calculate_paths_9ray_suburban(x, y, z))
 
     def get_datapoint_pl_9ray_suburban(self):
-        return (self.path_loss_9ray_suburban(self.uav_pos[0], self.uav_pos[1], self.uav_pos[2]), )
+        return (self.path_loss_9ray_suburban(self.uav_pos[0], self.uav_pos[1], self.uav_pos[2]),)
 
     # def path_loss_ce2r(self, x, y, z, r_rad, p_rad, y_rad):
     #     d_xy = self.distance(x, y, 0)
@@ -1036,7 +1052,7 @@ class Ui(QtWidgets.QMainWindow):
 
     def get_datapoint_taps_for_plotting(self):
         taps_complex = [real + 1j * imag for real, imag in zip(self.taps[:41], self.taps[41:])]
-        taps_complex = [x / 2**15 for x in taps_complex]
+        taps_complex = [x / 2 ** 15 for x in taps_complex]
         # taps_amplitude = [abs(x) / 1.4 for x in taps_complex]
         # taps_amplitude = [round(x * 4, 4) for x in taps_amplitude]
         # taps_phase = [cmath.phase(x) for x in taps_complex]
@@ -1136,7 +1152,9 @@ class Ui(QtWidgets.QMainWindow):
         for line_edit in [
             self.lineEdit, self.lineEdit_10
         ]:
-            if not line_edit.text().isnumeric():
+            try:
+                float(line_edit.text())
+            except ValueError:
                 line_edit.setStyleSheet("color: red;")
                 malformatted_input = True
         if malformatted_input:
@@ -1150,7 +1168,8 @@ class Ui(QtWidgets.QMainWindow):
         ]:
             line_edit.setStyleSheet("color: black;")
         # WiFi settings
-        self.uav_endpoint_controller.set_center_frequency_config(freq=int(float(self.lineEdit_2.text()) * 1_000_000_000))
+        self.uav_endpoint_controller.set_center_frequency_config(
+            freq=int(float(self.lineEdit_2.text()) * 1_000_000_000))
         self.uav_endpoint_controller.set_rx_gain_config(phy=PHY_WIFI, gain=int(self.lineEdit_6.text()))
         self.uav_endpoint_controller.set_tx_gain_config(phy=PHY_WIFI, gain=int(self.lineEdit_5.text()))
         self.uav_endpoint_controller.set_rx_frequency_offset_config(
@@ -1186,7 +1205,8 @@ class Ui(QtWidgets.QMainWindow):
         if not dryrun:
             self.uav_endpoint_controller.select_phy(self.uav_endpoint_controller.current_phy)
         # WiFi settings
-        self.ground_endpoint_controller.set_center_frequency_config(freq=int(float(self.lineEdit_2.text()) * 1_000_000_000))
+        self.ground_endpoint_controller.set_center_frequency_config(
+            freq=int(float(self.lineEdit_2.text()) * 1_000_000_000))
         self.ground_endpoint_controller.set_rx_gain_config(phy=PHY_WIFI, gain=int(self.lineEdit_13.text()))
         self.ground_endpoint_controller.set_tx_gain_config(phy=PHY_WIFI, gain=int(self.lineEdit_14.text()))
         self.ground_endpoint_controller.set_rx_frequency_offset_config(
@@ -1228,7 +1248,8 @@ class Ui(QtWidgets.QMainWindow):
         self.lineEdit_4.setText("4")
         self.lineEdit_3.setText("-4")
         self.lineEdit_2.setText("2.45")
-        self.lineEdit_10.setText("4")
+        # self.lineEdit_10.setText("4")  # zigbee
+        self.lineEdit_10.setText("0.5")  # LoRa
         self.lineEdit_17.setText("60")
         # self.lineEdit_17.setEnabled(False)
         self.lineEdit_18.setText("25")

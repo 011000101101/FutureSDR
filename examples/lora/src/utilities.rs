@@ -290,6 +290,8 @@ impl TryDowncast<usize> for String {}
 
 impl TryDowncast<f32> for String {}
 
+impl TryDowncast<Vec<u8>> for String {}
+
 impl TryDowncast<String> for usize {}
 
 impl TryDowncast<usize> for usize {
@@ -300,6 +302,8 @@ impl TryDowncast<usize> for usize {
 
 impl TryDowncast<f32> for usize {}
 
+impl TryDowncast<Vec<u8>> for usize {}
+
 impl TryDowncast<String> for f32 {}
 
 impl TryDowncast<usize> for f32 {}
@@ -307,6 +311,20 @@ impl TryDowncast<usize> for f32 {}
 impl TryDowncast<f32> for f32 {
     fn try_downcast(&self) -> Option<f32> {
         Some(*self)
+    }
+}
+
+impl TryDowncast<Vec<u8>> for f32 {}
+
+impl TryDowncast<String> for Vec<u8> {}
+
+impl TryDowncast<usize> for Vec<u8> {}
+
+impl TryDowncast<f32> for Vec<u8> {}
+
+impl TryDowncast<Vec<u8>> for Vec<u8> {
+    fn try_downcast(&self) -> Option<Vec<u8>> {
+        Some(self.clone())
     }
 }
 
@@ -319,6 +337,7 @@ where
     String: TryDowncast<T>,
     usize: TryDowncast<T>,
     f32: TryDowncast<T>,
+    Vec<u8>: TryDowncast<T>,
 {
     let tags: Vec<(usize, T)> = tags_in
         .iter()
@@ -332,6 +351,7 @@ where
                         Pmt::String(payload) => Some((*index, payload.try_downcast().unwrap())),
                         Pmt::Usize(payload) => Some((*index, payload.try_downcast().unwrap())),
                         Pmt::F32(payload) => Some((*index, payload.try_downcast().unwrap())),
+                        Pmt::Blob(payload) => Some((*index, payload.try_downcast().unwrap())),
                         _ => None,
                     }
                 } else {

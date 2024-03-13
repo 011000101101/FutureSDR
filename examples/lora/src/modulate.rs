@@ -2,8 +2,6 @@ use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
 use std::cmp::min;
 
-use futuresdr::log::info;
-
 use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;

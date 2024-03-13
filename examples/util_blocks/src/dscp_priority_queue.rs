@@ -27,7 +27,7 @@ where
             priority_index_map: HashMap::from_iter(
                 new_priority_values.iter().map(|x| (*x, 0_usize)),
             ),
-            priority_values: new_priority_values.clone(),
+            priority_values: new_priority_values,
             max_size: new_max_size,
         }
     }
@@ -52,6 +52,24 @@ where
                 );
             }
             self.data.pop_front()
+        }
+    }
+
+    pub fn pop_front_with_condition(&mut self, condition: Box<dyn Fn(&T1) -> bool>) -> Option<T1> {
+        if self.data.is_empty() {
+            None
+        } else if self.data.get(0).map_or(false, |x| condition(x)) {
+            for priority_key in self.priority_values {
+                self.priority_index_map.insert(
+                    *priority_key,
+                    self.priority_index_map[priority_key]
+                        .checked_sub(1_usize)
+                        .unwrap_or(0_usize),
+                );
+            }
+            self.data.pop_front()
+        } else {
+            None
         }
     }
 

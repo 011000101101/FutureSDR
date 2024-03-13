@@ -111,7 +111,7 @@ impl Kernel for Whitening {
                 0,
                 Tag::NamedAny(
                     "payload_str".to_string(),
-                    Box::new(Pmt::String(payload.clone())),
+                    Box::new(Pmt::Blob(payload.as_bytes().iter().cloned().collect())),
                 ),
             );
             for i in 0..payload.len() {

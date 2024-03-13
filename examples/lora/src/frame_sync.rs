@@ -88,9 +88,9 @@ pub struct FrameSync {
     // m_pay_len: u32,                 //< payload length
     // m_has_crc: u8,                  //< CRC presence
     // m_invalid_header: u8,           //< invalid header checksum
-    m_impl_head: bool,        //< use implicit header mode
-    m_os_factor: usize,       //< oversampling factor
-    m_sync_words: Vec<usize>, //< vector containing the two sync words (network identifiers)
+    m_impl_head: bool,  //< use implicit header mode
+    m_os_factor: usize, //< oversampling factor
+    // m_sync_words: Vec<usize>, //< vector containing the two sync words (network identifiers)
     // m_ldro: bool,                        //< use of low datarate optimisation mode
     m_n_up_req: SyncState, //< number of consecutive upchirps required to trigger a detection
 
@@ -160,12 +160,12 @@ impl FrameSync {
         if preamble_len_tmp < 5 {
             panic!("Preamble length should be greater than 5!"); // only warning in original implementation
         }
-        let sync_word_tmp: Vec<usize> = if sync_word.len() == 1 {
-            let tmp = sync_word[0];
-            vec![((tmp & 0xF0_usize) >> 4) << 3, (tmp & 0x0F_usize) << 3]
-        } else {
-            sync_word
-        };
+        // let sync_word_tmp: Vec<usize> = if sync_word.len() == 1 {
+        //     let tmp = sync_word[0];
+        //     vec![((tmp & 0xF0_usize) >> 4) << 3, (tmp & 0x0F_usize) << 3]
+        // } else {
+        //     sync_word
+        // };
         let m_number_of_bins_tmp = 1_usize << sf;
         let m_samples_per_symbol_tmp = m_number_of_bins_tmp * os_factor;
         let (m_upchirp_tmp, m_downchirp_tmp) = build_ref_chirps(sf, 1); // vec![0; m_number_of_bins_tmp]
@@ -191,8 +191,8 @@ impl FrameSync {
                 m_bw: bandwidth,               //< Bandwidth
                 m_sf: sf,                      //< Spreading factor
 
-                m_sync_words: sync_word_tmp, //< vector containing the two sync words (network identifiers)
-                m_os_factor: os_factor,      //< oversampling factor
+                // m_sync_words: sync_word_tmp, //< vector containing the two sync words (network identifiers)
+                m_os_factor: os_factor, //< oversampling factor
 
                 m_preamb_len: preamble_len_tmp, //< Number of consecutive upchirps in preamble
                 // net_ids: vec![None; 2],         //< values of the network identifiers received
@@ -283,61 +283,61 @@ impl FrameSync {
     //         ninput_items_required[0] = (m_os_factor * (m_number_of_bins + 2));
     //     }
 
-    fn estimate_cfo_frac(&self, samples: &[Complex32]) -> (Vec<Complex32>, f64) {
-        // create longer downchirp
-        let mut downchirp_aug: Vec<Complex32> =
-            vec![Complex32::new(0., 0.); self.up_symb_to_use * self.m_number_of_bins];
-        for i in 0_usize..self.up_symb_to_use {
-            downchirp_aug[(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)]
-                .copy_from_slice(&self.m_downchirp[0..self.m_number_of_bins]);
-        }
-
-        // Dechirping
-        let dechirped: Vec<Complex32> = volk_32fc_x2_multiply_32fc(&samples, &downchirp_aug);
-        // prepare FFT
-        // zero padded
-        // let mut cx_in_cfo: Vec<Complex32> = vec![Complex32::new(0., 0.), 2 * self.up_symb_to_use * self.m_number_of_bins];
-        // cx_in_cfo[..(self.up_symb_to_use * self.m_number_of_bins)].copy_from_slice(dechirped.as_slice());
-        let mut cx_out_cfo: Vec<Complex32> =
-            vec![Complex32::new(0., 0.); 2 * self.up_symb_to_use * self.m_number_of_bins];
-        cx_out_cfo[..(self.up_symb_to_use * self.m_number_of_bins)]
-            .copy_from_slice(dechirped.as_slice());
-        // do the FFT
-        FftPlanner::new()
-            .plan_fft(cx_out_cfo.len(), FftDirection::Forward)
-            .process(&mut cx_out_cfo);
-        // Get magnitude
-        let fft_mag_sq: Vec<f32> = volk_32fc_magnitude_squared_32f(&cx_out_cfo);
-        // get argmax here
-        let k0: usize = argmax_float(&fft_mag_sq);
-
-        // get three spectral lines
-        let y_1 = fft_mag_sq[(k0 - 1) % (2 * self.up_symb_to_use * self.m_number_of_bins)] as f64;
-        let y0 = fft_mag_sq[k0] as f64;
-        let y1 = fft_mag_sq[(k0 + 1) % (2 * self.up_symb_to_use * self.m_number_of_bins)] as f64;
-        // set constant coeff
-        let u = 64. * self.m_number_of_bins as f64 / 406.5506497; // from Cui yang (15)
-        let v = u * 2.4674;
-        // RCTSL
-        let wa = (y1 - y_1) / (u * (y1 + y_1) + v * y0);
-        let ka = wa * self.m_number_of_bins as f64 / core::f64::consts::PI;
-        let k_residual = ((k0 as f64 + ka) / 2. / self.up_symb_to_use as f64) % 1.;
-        let cfo_frac = k_residual - if k_residual > 0.5 { 1. } else { 0. };
-        // Correct CFO frac in preamble
-        let cfo_frac_correc_aug: Vec<Complex32> = (0_usize
-            ..self.up_symb_to_use * self.m_number_of_bins)
-            .map(|x| {
-                Complex32::from_polar(
-                    1.,
-                    -2. * PI * (cfo_frac as f32) / self.m_number_of_bins as f32 * x as f32,
-                )
-            })
-            .collect();
-
-        let preamble_upchirps = volk_32fc_x2_multiply_32fc(&samples, &cfo_frac_correc_aug);
-
-        (preamble_upchirps, cfo_frac)
-    }
+    // fn estimate_cfo_frac(&self, samples: &[Complex32]) -> (Vec<Complex32>, f64) {
+    //     // create longer downchirp
+    //     let mut downchirp_aug: Vec<Complex32> =
+    //         vec![Complex32::new(0., 0.); self.up_symb_to_use * self.m_number_of_bins];
+    //     for i in 0_usize..self.up_symb_to_use {
+    //         downchirp_aug[(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)]
+    //             .copy_from_slice(&self.m_downchirp[0..self.m_number_of_bins]);
+    //     }
+    //
+    //     // Dechirping
+    //     let dechirped: Vec<Complex32> = volk_32fc_x2_multiply_32fc(&samples, &downchirp_aug);
+    //     // prepare FFT
+    //     // zero padded
+    //     // let mut cx_in_cfo: Vec<Complex32> = vec![Complex32::new(0., 0.), 2 * self.up_symb_to_use * self.m_number_of_bins];
+    //     // cx_in_cfo[..(self.up_symb_to_use * self.m_number_of_bins)].copy_from_slice(dechirped.as_slice());
+    //     let mut cx_out_cfo: Vec<Complex32> =
+    //         vec![Complex32::new(0., 0.); 2 * self.up_symb_to_use * self.m_number_of_bins];
+    //     cx_out_cfo[..(self.up_symb_to_use * self.m_number_of_bins)]
+    //         .copy_from_slice(dechirped.as_slice());
+    //     // do the FFT
+    //     FftPlanner::new()
+    //         .plan_fft(cx_out_cfo.len(), FftDirection::Forward)
+    //         .process(&mut cx_out_cfo);
+    //     // Get magnitude
+    //     let fft_mag_sq: Vec<f32> = volk_32fc_magnitude_squared_32f(&cx_out_cfo);
+    //     // get argmax here
+    //     let k0: usize = argmax_float(&fft_mag_sq);
+    //
+    //     // get three spectral lines
+    //     let y_1 = fft_mag_sq[(k0 - 1) % (2 * self.up_symb_to_use * self.m_number_of_bins)] as f64;
+    //     let y0 = fft_mag_sq[k0] as f64;
+    //     let y1 = fft_mag_sq[(k0 + 1) % (2 * self.up_symb_to_use * self.m_number_of_bins)] as f64;
+    //     // set constant coeff
+    //     let u = 64. * self.m_number_of_bins as f64 / 406.5506497; // from Cui yang (15)
+    //     let v = u * 2.4674;
+    //     // RCTSL
+    //     let wa = (y1 - y_1) / (u * (y1 + y_1) + v * y0);
+    //     let ka = wa * self.m_number_of_bins as f64 / core::f64::consts::PI;
+    //     let k_residual = ((k0 as f64 + ka) / 2. / self.up_symb_to_use as f64) % 1.;
+    //     let cfo_frac = k_residual - if k_residual > 0.5 { 1. } else { 0. };
+    //     // Correct CFO frac in preamble
+    //     let cfo_frac_correc_aug: Vec<Complex32> = (0_usize
+    //         ..self.up_symb_to_use * self.m_number_of_bins)
+    //         .map(|x| {
+    //             Complex32::from_polar(
+    //                 1.,
+    //                 -2. * PI * (cfo_frac as f32) / self.m_number_of_bins as f32 * x as f32,
+    //             )
+    //         })
+    //         .collect();
+    //
+    //     let preamble_upchirps = volk_32fc_x2_multiply_32fc(&samples, &cfo_frac_correc_aug);
+    //
+    //     (preamble_upchirps, cfo_frac)
+    // }
 
     fn estimate_cfo_frac_bernier(&self, samples: &[Complex32]) -> (Vec<Complex32>, f64) {
         let mut fft_val: Vec<Complex32> =
@@ -536,7 +536,7 @@ impl FrameSync {
         // println!("{:?}", fft_mag);
         // println!("{max_idx}");
         let sig_en = fft_mag[max_idx] as f64;
-        let sig_en_samples = 33;
+        // let sig_en_samples = 33;
         // let noise_en_samples = self.m_number_of_bins / 2;
         let noise_en = fft_mag.iter().map(|x| *x as f64).fold(0., |acc, e| acc + e);
         // let noise_en_narrow_est = noise_en / fft_mag.len() as f64;
@@ -577,7 +577,7 @@ impl FrameSync {
         // println!("{}");
         // let sig_en = sig_plus_noise_en - noise_en_narrow_est * sig_en_samples as f64;
         let noise_en = noise_en - sig_en;
-        let dechirped_snr = (10. * (sig_en / (noise_en)).log10());
+        let dechirped_snr = 10. * (sig_en / (noise_en)).log10();
         // let dechirped_snr = (10. * (sig_en / noise_en).log10());
         // println!("{dechirped_snr}dB");
         // println!("coding_gain {}dB", coding_gain);
@@ -1499,6 +1499,7 @@ impl Kernel for FrameSync {
         };
         assert!(nitems_to_process >= items_to_consume as usize, "tried to consume {items_to_consume} samples, but input buffer only holds {nitems_to_process}."); // TODO was triggered detected syntactically correct net_id with matching offset 3
         if items_to_consume > 0 {
+            println!("consumed {} samples", items_to_consume);
             sio.input(0).consume(items_to_consume as usize);
         }
         if items_to_output > 0 {

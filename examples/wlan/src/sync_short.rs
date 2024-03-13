@@ -1,6 +1,6 @@
 use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
-use futuresdr::num_complex::{Complex32, ComplexFloat};
+use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
@@ -11,7 +11,7 @@ use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
 use futuresdr::runtime::WorkIo;
-use std::num::FpCategory::Nan;
+// use std::num::FpCategory::Nan;
 
 const MIN_GAP: usize = 480;
 const MAX_SAMPLES: usize = 540 * 80;

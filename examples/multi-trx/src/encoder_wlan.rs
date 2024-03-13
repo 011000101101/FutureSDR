@@ -1,4 +1,4 @@
-use crate::{BoundedDiscretePriorityQueue, PRIORITY_VALUES};
+use util_blocks::{BoundedDiscretePriorityQueue, PRIORITY_VALUES};
 
 use wlan::FrameParam;
 use wlan::Mcs;

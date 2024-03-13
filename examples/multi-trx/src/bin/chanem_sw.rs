@@ -19,7 +19,7 @@ use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
 
-use multitrx::AWGNComplex32;
+use util_blocks::AWGNComplex32;
 use multitrx::Complex32Deserializer;
 use multitrx::Complex32Serializer;
 use multitrx::TcpSink;
