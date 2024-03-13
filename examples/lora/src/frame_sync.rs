@@ -160,12 +160,12 @@ impl FrameSync {
         if preamble_len_tmp < 5 {
             panic!("Preamble length should be greater than 5!"); // only warning in original implementation
         }
-        // let sync_word_tmp: Vec<usize> = if sync_word.len() == 1 {
-        //     let tmp = sync_word[0];
-        //     vec![((tmp & 0xF0_usize) >> 4) << 3, (tmp & 0x0F_usize) << 3]
-        // } else {
-        //     sync_word
-        // };
+        let sync_word_tmp: Vec<usize> = if sync_word.len() == 1 {
+            let tmp = sync_word[0];
+            vec![((tmp & 0xF0_usize) >> 4) << 3, (tmp & 0x0F_usize) << 3]
+        } else {
+            sync_word
+        };
         let m_number_of_bins_tmp = 1_usize << sf;
         let m_samples_per_symbol_tmp = m_number_of_bins_tmp * os_factor;
         let (m_upchirp_tmp, m_downchirp_tmp) = build_ref_chirps(sf, 1); // vec![0; m_number_of_bins_tmp]
@@ -709,7 +709,10 @@ impl FrameSync {
                         / (self.m_sf - 2 * m_ldro as usize) as f64)
                         .ceil() as isize
                         * (4 + m_cr as isize);
-                assert!(m_symb_numb_tmp >= 0, "Döner: computed negative symbol number");
+                assert!(
+                    m_symb_numb_tmp >= 0,
+                    "Döner: computed negative symbol number"
+                );
                 self.m_symb_numb = m_symb_numb_tmp as usize;
                 self.m_received_head = true;
                 frame_info.insert(String::from("is_header"), Pmt::Bool(false));
@@ -865,7 +868,7 @@ impl FrameSync {
         out: &mut [Complex32],
         nitems_to_process: usize,
     ) -> (isize, usize) {
-        let mut items_to_consume = 4;  // always consume the remaining four samples of the second NetId (except when the offsets added below become more negative than 1/4 symbol length), left over by the previous state as a buffer
+        let mut items_to_consume = 4; // always consume the remaining four samples of the second NetId (except when the offsets added below become more negative than 1/4 symbol length), left over by the previous state as a buffer
         let mut items_to_output = 0;
         let mut sync_log_out: &mut [f32] = &mut [];
         let m_should_log = if sio.outputs().len() == 2 {
@@ -878,7 +881,7 @@ impl FrameSync {
         let count = self.m_samples_per_symbol;
         // requires self.m_samples_per_symbol samples in input buffer, but QuarterDown also needs 'backward' access to up to 3 samples for net-id re-synching when CFO is at minimum
         self.additional_symbol_samp[self.m_samples_per_symbol..(self.m_samples_per_symbol + count)]
-            .copy_from_slice(&input[offset..(offset+count)]);
+            .copy_from_slice(&input[offset..(offset + count)]);
         let m_cfo_int = if let Some(down_val) = self.down_val {
             // info!("down_val: {}", down_val);
             // tuning CFO entails re-tuning STO (to not lose alignment of preamble upchirps) -> slope is normalized to 1 -> move half distance in frequency -> entails moving half distance in time -> aligns downchirp with sampling window, while keeping alignment of upchirps
@@ -922,11 +925,11 @@ impl FrameSync {
             .collect();
         self.preamble_upchirps =
             volk_32fc_x2_multiply_32fc(&self.preamble_upchirps, &cfo_int_correc); // count: up_symb_to_use * m_number_of_bins
-        // correct SFO in the preamble upchirps
-        // SFO times symbol duration = number of samples we need to compensate the symbol duration by
-        // small, as m_cfo_int+self.m_cfo_frac bounded by ]-(self.m_number_of_bins/4+0.5),+(self.m_number_of_bins/4+0.5)[
-        // BW/s_f = 1/6400 @ 125kHz, 800mHz
-        // -> sfo_hat ~ ]-1/250,+1/250[
+                                                                                  // correct SFO in the preamble upchirps
+                                                                                  // SFO times symbol duration = number of samples we need to compensate the symbol duration by
+                                                                                  // small, as m_cfo_int+self.m_cfo_frac bounded by ]-(self.m_number_of_bins/4+0.5),+(self.m_number_of_bins/4+0.5)[
+                                                                                  // BW/s_f = 1/6400 @ 125kHz, 800mHz
+                                                                                  // -> sfo_hat ~ ]-1/250,+1/250[
         self.sfo_hat = (m_cfo_int as f32 + self.m_cfo_frac as f32) * self.m_bw as f32
             / self.m_center_freq as f32;
         // CFO normalized to carrier frequency / SFO times t_samp
@@ -959,7 +962,8 @@ impl FrameSync {
         // re-estimate sto_frac based on the now corrected self.preamble_upchirps to get better estimate than in the beginning of the upchirps
         let tmp_sto_frac = self.estimate_sto_frac();
         let diff_sto_frac = self.m_sto_frac - tmp_sto_frac; // both bounded by ]-0.5, 0.5] -> diff bounded by ]-1.0, 1.0[
-        if diff_sto_frac.abs() <= (self.m_os_factor - 1) as f32 / self.m_os_factor as f32 {  // TODO always prevents update if os_factor = 1
+        if diff_sto_frac.abs() <= (self.m_os_factor - 1) as f32 / self.m_os_factor as f32 {
+            // TODO always prevents update if os_factor = 1
             // avoid introducing off-by-one errors by estimating fine_sto=-0.499 , rough_sto=0.499
             self.m_sto_frac = tmp_sto_frac;
         }
@@ -1065,19 +1069,23 @@ impl FrameSync {
             self.reset();
             return (items_to_consume, 0);
         }
-        self.net_id[0] = net_id_0_tmp.unwrap().try_into()
-        .expect("net-id can't be greater than SF bits, with SF<=12.");
+        self.net_id[0] = net_id_0_tmp
+            .unwrap()
+            .try_into()
+            .expect("net-id can't be greater than SF bits, with SF<=12.");
         let net_id_1_tmp = FrameSync::get_symbol_val(
             &net_ids_samp_dec[self.m_number_of_bins..(2 * self.m_number_of_bins)],
             &self.m_downchirp,
         );
         if net_id_1_tmp.is_none() {
-                warn!("Döner: encountered symbol with signal energy 0.0, aborting.");
-                self.reset();
-                return (items_to_consume, 0);
+            warn!("Döner: encountered symbol with signal energy 0.0, aborting.");
+            self.reset();
+            return (items_to_consume, 0);
         }
-        self.net_id[1]  = net_id_1_tmp.unwrap().try_into()
-        .expect("net-id can't be greater than SF bits, with SF<=12.");
+        self.net_id[1] = net_id_1_tmp
+            .unwrap()
+            .try_into()
+            .expect("net-id can't be greater than SF bits, with SF<=12.");
         let mut one_symbol_off = false;
         let mut off_by_one_id = false;
 
@@ -1129,8 +1137,10 @@ impl FrameSync {
                 self.reset();
                 return (items_to_consume, 0);
             }
-            let net_id_1_tmp: u16 = net_id_1_tmp.unwrap().try_into()
-            .expect("net-id can't be greater than SF bits, with SF<=12.");
+            let net_id_1_tmp: u16 = net_id_1_tmp
+                .unwrap()
+                .try_into()
+                .expect("net-id can't be greater than SF bits, with SF<=12.");
             if net_id_1_tmp & 0x07 != net_id_off_raw {
                 info!(
                     "FrameSync: bad sync: different offset for recovered net_id[0] and net_id[1]"
@@ -1193,7 +1203,10 @@ impl FrameSync {
         // consume the quarter downchirp, and at the same time correct CFOint (already applied correction for NET_ID recovery was only in retrospect on a local buffer)
         items_to_consume +=
             self.m_samples_per_symbol as isize / 4 + self.m_os_factor as isize * m_cfo_int;
-        assert!(items_to_consume <= nitems_to_process as isize, "must not happen, we already altered persistent state.");
+        assert!(
+            items_to_consume <= nitems_to_process as isize,
+            "must not happen, we already altered persistent state."
+        );
         //assert!(items_to_consume >= 0_isize, "must not happen, can not consume negative amount of samples. Implies net_id_off({net_id_off}) - m_cfo_int({m_cfo_int}) was greater than self.m_number_of_bins({})", self.m_number_of_bins);
         // info!("Frame Detected!!!!!!!!!!");
         // update sto_frac to its value at the payload beginning
@@ -1414,7 +1427,11 @@ impl FrameSync {
 
             //   update sfo evolution
             // if cumulative SFO is greater than 1/2 sample duration
-            assert!(self.sfo_cum.abs() <= 1.5 / self.m_os_factor as f32, "Döner: SFO is greater than one microsample {}", self.sfo_cum);
+            assert!(
+                self.sfo_cum.abs() <= 1.5 / self.m_os_factor as f32,
+                "Döner: SFO is greater than one microsample {}",
+                self.sfo_cum
+            );
             if self.sfo_cum.abs() > 0.5 / self.m_os_factor as f32 {
                 // sfo_cum starts out in range ]-0.5,0.5[ microsamples, sfo_hat is generally multiple orders of magnitude smaller than one microsample (at reasonable os_factors) -> sfo_cum can surpass the threshold, but not "overshoot" by more than one microsample -> it is sufficient to compensate by one microsample
                 items_to_consume -= self.sfo_cum.signum() as isize;
@@ -1528,15 +1545,17 @@ impl Kernel for FrameSync {
         // }
 
         if nitems_to_process < self.m_number_of_bins + 2
-            || nitems_to_process < self.m_samples_per_symbol + 4  // 4 additional samples to cope with demand of QuarterDown (4 samples "backward" and 1 symbol forward)
+            || nitems_to_process < self.m_samples_per_symbol + 4
+        // 4 additional samples to cope with demand of QuarterDown (4 samples "backward" and 1 symbol forward)
         {
             // TODO check, condition taken from self.forecast()
             return Ok(());
         }
         // downsampling
         // m_sto_frac is bounded by [-0.5, 0.5[ -> indexing_offset [0, self.m_os_factor]
-        let indexing_offset = (self.m_os_factor / 2)
-            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32);
+        let indexing_offset = ((self.m_os_factor / 2) as isize
+            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32))
+            as usize;
         self.in_down = input
             [indexing_offset..(indexing_offset + self.m_number_of_bins * self.m_os_factor)]
             .iter()
@@ -1556,10 +1575,13 @@ impl Kernel for FrameSync {
             DecoderState::Sync => self.sync(sio, input, out, nitems_to_process),
             DecoderState::SfoCompensation => self.compensate_sfo(sio, out),
         };
-        assert!(items_to_consume >= 0, "tried to consume negative amount of samples ({items_to_consume})");
+        assert!(
+            items_to_consume >= 0,
+            "tried to consume negative amount of samples ({items_to_consume})"
+        );
         assert!(nitems_to_process >= items_to_consume as usize, "tried to consume {items_to_consume} samples, but input buffer only holds {nitems_to_process}.");
         if items_to_consume > 0 {
-            println!("consumed {} samples", items_to_consume);
+            // println!("consumed {} samples", items_to_consume);
             sio.input(0).consume(items_to_consume as usize);
         }
         if items_to_output > 0 {

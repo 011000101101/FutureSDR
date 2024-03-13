@@ -214,10 +214,11 @@ struct Args {
 // const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 1122580;  // TODO maybe this
 const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 8 * MAX_ENCODED_BITS; // TODO maybe this
                                                                                 // const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize = 8192 * 4 * 8 * 16;
-const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize = 8192 * 4;
+const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize =
+    LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST * 4; // 8192 * 4 * 16; // sufficient for SF8
 
 const LORA_BW: usize = 500000;
-const LORA_SF: usize = 5;
+const LORA_SF: usize = 7;
 
 const DSCP_EF: u8 = 0b101110 << 2;
 const NUM_PROTOCOLS: usize = 2;
@@ -411,7 +412,9 @@ fn main() -> Result<()> {
         "out0",
         sink,
         "in",
-        Circular::with_size(LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST),
+        Circular::with_size(
+            LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST.max(LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME),
+        ),
     )?;
     // fg.connect_stream(
     //     sink_selector, "out0",
@@ -578,9 +581,9 @@ fn main() -> Result<()> {
         LORA_BW,
         // vec![8, 16],
         // vec![42, 12],
-        vec![42, 12],
+        vec![8, 16],
         // 20 * (1 << args.spreading_factor) * args.sample_rate as usize / args.bandwidth,
-        20 * (1 << LORA_SF) * LORA_BW / LORA_BW,
+        200 * (1 << LORA_SF) * LORA_BW / LORA_BW,
         Some(8),
     );
 
@@ -595,7 +598,7 @@ fn main() -> Result<()> {
         whitening > header > add_crc > hamming_enc > interleaver > gray_demap
         >
         // modulate [Circular::with_size(LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST.max(LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME))] sink_selector.in1
-        modulate > sink_selector.in1
+        modulate [Circular::with_size(LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST.max(LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME))] sink_selector.in1
     );
 
     // ========================================
@@ -605,11 +608,11 @@ fn main() -> Result<()> {
     let soft_decoding: bool = false;
     // let downsample = FirBuilder::new_resampling::<Complex32, Complex32>(5, 8);
     let frame_sync = FrameSync::new(
-        center_freq[1] as u32 + rx_freq_offset[1] as u32,
+        center_freq[1] as u32 - rx_freq_offset[1] as u32,
         LORA_BW as u32,
         LORA_SF,
         false,
-        vec![42, 12],
+        vec![8, 16],
         1,
         None,
     );
