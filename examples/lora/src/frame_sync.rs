@@ -865,7 +865,7 @@ impl FrameSync {
         out: &mut [Complex32],
         nitems_to_process: usize,
     ) -> (isize, usize) {
-        let mut items_to_consume = 3;  // always consume the remaining three samples of the second NetId (except when the offsets added below become more negative than 1/4 symbol length), left over by the previous state as a buffer
+        let mut items_to_consume = 4;  // always consume the remaining four samples of the second NetId (except when the offsets added below become more negative than 1/4 symbol length), left over by the previous state as a buffer
         let mut items_to_output = 0;
         let mut sync_log_out: &mut [f32] = &mut [];
         let m_should_log = if sio.outputs().len() == 2 {
@@ -924,6 +924,9 @@ impl FrameSync {
             volk_32fc_x2_multiply_32fc(&self.preamble_upchirps, &cfo_int_correc); // count: up_symb_to_use * m_number_of_bins
         // correct SFO in the preamble upchirps
         // SFO times symbol duration = number of samples we need to compensate the symbol duration by
+        // small, as m_cfo_int+self.m_cfo_frac bounded by ]-(self.m_number_of_bins/4+0.5),+(self.m_number_of_bins/4+0.5)[
+        // BW/s_f = 1/6400 @ 125kHz, 800mHz
+        // -> sfo_hat ~ ]-1/250,+1/250[
         self.sfo_hat = (m_cfo_int as f32 + self.m_cfo_frac as f32) * self.m_bw as f32
             / self.m_center_freq as f32;
         // CFO normalized to carrier frequency / SFO times t_samp
@@ -955,7 +958,7 @@ impl FrameSync {
         self.preamble_upchirps[0..count].copy_from_slice(&tmp);
         // re-estimate sto_frac based on the now corrected self.preamble_upchirps to get better estimate than in the beginning of the upchirps
         let tmp_sto_frac = self.estimate_sto_frac();
-        let diff_sto_frac = self.m_sto_frac - tmp_sto_frac;
+        let diff_sto_frac = self.m_sto_frac - tmp_sto_frac; // both bounded by ]-0.5, 0.5] -> diff bounded by ]-1.0, 1.0[
         if diff_sto_frac.abs() <= (self.m_os_factor - 1) as f32 / self.m_os_factor as f32 {  // TODO always prevents update if os_factor = 1
             // avoid introducing off-by-one errors by estimating fine_sto=-0.499 , rough_sto=0.499
             self.m_sto_frac = tmp_sto_frac;
@@ -1000,9 +1003,16 @@ impl FrameSync {
 
         // update sto_frac to its value at the beginning of the net id
         self.m_sto_frac += self.sfo_hat * self.m_preamb_len as f32;
-        // ensure that m_sto_frac is in [-0.5,0.5]
-        if self.m_sto_frac.abs() > 0.5 {
-            self.m_sto_frac += if self.m_sto_frac > 0. { -1. } else { 1. };
+        // ensure that m_sto_frac is in ]-0.5,0.5]
+        // STO_int is already at state of NetID 1 (due to re-synching via net_id), ignore additional int offset normally created by wrapping around the fractional offset
+        // TODO evaluate, original code actually ensures it is within [-0.5, 0.5]
+        // if self.m_sto_frac.abs() > 0.5 {
+        //     self.m_sto_frac += if self.m_sto_frac > 0. { -1. } else { 1. };
+        // }
+        if self.m_sto_frac * 2.0 > 1.0 {
+            self.m_sto_frac -= 1.0;
+        } else if self.m_sto_frac * 2.0 <= -1.0 {
+            self.m_sto_frac += 1.0;
         }
         // decim net id according to new sto_frac and sto int
         // start_off gives the offset in the net_id_samp vector required to be aligned in time (CFOint is equivalent to STOint at this point, since upchirp_val was forced to 0, and initial alignment has already been performed. note that CFOint here is only the remainder of STOint that needs to be re-aligned.)
@@ -1187,7 +1197,17 @@ impl FrameSync {
         //assert!(items_to_consume >= 0_isize, "must not happen, can not consume negative amount of samples. Implies net_id_off({net_id_off}) - m_cfo_int({m_cfo_int}) was greater than self.m_number_of_bins({})", self.m_number_of_bins);
         // info!("Frame Detected!!!!!!!!!!");
         // update sto_frac to its value at the payload beginning
+        // self.m_sto_frac can now be slightly outside ]-0.5,0.5] samples
         self.m_sto_frac += self.sfo_hat * 4.25;
+        // STO_int (=k_hat - CFO_int) was last updated at start of netID -> shift sto_frac back into ]-0.5,0.5] range and add possible offset of one to STO_int (by consuming one sample more or less)
+        // TODO evaluate
+        if self.m_sto_frac * 2.0 > 1.0 {
+            self.m_sto_frac -= 1.0;
+            items_to_consume += 1;
+        } else if self.m_sto_frac * 2.0 <= -1.0 {
+            self.m_sto_frac += 1.0;
+            items_to_consume -= 1;
+        }
         self.sfo_cum = ((self.m_sto_frac * self.m_os_factor as f32)
             - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32) as f32)
             / self.m_os_factor as f32;
@@ -1355,9 +1375,9 @@ impl FrameSync {
                 let count = self.m_samples_per_symbol;
                 self.additional_symbol_samp[0..count].copy_from_slice(&input[0..count]);
                 self.transition_state(DecoderState::Sync, Some(SyncState::QuarterDown));
-                // do not consume the last three samples of the symbol zet, as we need an additional buffer in the following QarterDown state to cope with severely negative STO_int
-                // also work only ensures that there is one full symbol plus these three in the input queue before calling the subfunctions, so by leaving 3 samples of the second downchirp, we will have 1/4 symbol time + 3 samples to sync backward, but also a full new symbol for the additional_symbol_samp buffer
-                (items_to_consume, items_to_output) = (self.m_samples_per_symbol as isize - 3, 0);
+                // do not consume the last four samples of the symbol yet, as we need an additional buffer in the following QarterDown state to cope with severely negative STO_int in combination with negative re-synching due to NetId offset and fractional STO <-0.5 due to SFO evolution
+                // also work only ensures that there is one full symbol plus these four in the input queue before calling the subfunctions, so by leaving 4 samples of the second downchirp, we will have 1/4 symbol time + 4 samples to sync backward, but also a full new symbol for the additional_symbol_samp buffer
+                (items_to_consume, items_to_output) = (self.m_samples_per_symbol as isize - 4, 0);
             }
             SyncState::QuarterDown => {
                 (items_to_consume, items_to_output) =
@@ -1396,7 +1416,8 @@ impl FrameSync {
             // if cumulative SFO is greater than 1/2 sample duration
             assert!(self.sfo_cum.abs() <= 1.5 / self.m_os_factor as f32, "Döner: SFO is greater than one microsample {}", self.sfo_cum);
             if self.sfo_cum.abs() > 0.5 / self.m_os_factor as f32 {
-                items_to_consume -= self.sfo_cum.signum() as isize;  // TODO why only use the sign bit? could it not be larger than 1.5 microsamples, making it necessary to compensate by more than 1?
+                // sfo_cum starts out in range ]-0.5,0.5[ microsamples, sfo_hat is generally multiple orders of magnitude smaller than one microsample (at reasonable os_factors) -> sfo_cum can surpass the threshold, but not "overshoot" by more than one microsample -> it is sufficient to compensate by one microsample
+                items_to_consume -= self.sfo_cum.signum() as isize;
                 self.sfo_cum -= self.sfo_cum.signum() / self.m_os_factor as f32;
             }
             self.sfo_cum += self.sfo_hat;
@@ -1507,15 +1528,15 @@ impl Kernel for FrameSync {
         // }
 
         if nitems_to_process < self.m_number_of_bins + 2
-            || nitems_to_process < self.m_samples_per_symbol + 3  // 3 additional samples to cope with demand of QuarterDown (3 samples "backward" and 1 symbol forward)
+            || nitems_to_process < self.m_samples_per_symbol + 4  // 4 additional samples to cope with demand of QuarterDown (4 samples "backward" and 1 symbol forward)
         {
             // TODO check, condition taken from self.forecast()
             return Ok(());
         }
         // downsampling
-        let indexing_offset = (self.m_os_factor as f32 / 2.
-            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32) as f32)
-            .trunc() as usize;
+        // m_sto_frac is bounded by [-0.5, 0.5[ -> indexing_offset [0, self.m_os_factor]
+        let indexing_offset = (self.m_os_factor / 2)
+            - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32);
         self.in_down = input
             [indexing_offset..(indexing_offset + self.m_number_of_bins * self.m_os_factor)]
             .iter()
