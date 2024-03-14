@@ -1,5 +1,6 @@
 use futuresdr::anyhow::Result;
-use futuresdr::macros::async_trait;
+use futuresdr::log::warn;
+use futuresdr::macros::{async_trait, message_handler};
 use std::cmp::min;
 
 use futuresdr::num_complex::Complex32;
@@ -18,15 +19,14 @@ use futuresdr::runtime::{Block, ItemTag};
 use crate::utilities::*;
 
 pub struct Modulate {
-    m_sf: usize, // Transmission spreading factor
-    // m_samp_rate: usize,          // Transmission sampling rate
-    // m_bw: usize,                 // Transmission bandwidth (Works only for samp_rate=bw)
+    m_sf: usize,        // Transmission spreading factor
+    m_samp_rate: usize, // Transmission sampling rate
+    m_bw: usize,        // Transmission bandwidth (Works only for samp_rate=bw)
     // m_number_of_bins: usize,     // number of bin per loar symbol
     m_samples_per_symbol: usize, // samples per symbols(Works only for 2^sf)
     m_sync_words: Vec<usize>,    // sync words (network id)
 
-    m_ninput_items_required: usize, // number of samples required to call this block (forecast)
-
+    // m_ninput_items_required: usize, // number of samples required to call this block (forecast)
     m_os_factor: usize, // ovesampling factor based on sampling rate and bandwidth
 
     m_inter_frame_padding: usize, // length in samples of zero append to each frame
@@ -73,16 +73,19 @@ impl Modulate {
                 .add_input::<u16>("in")
                 .add_output::<Complex32>("out")
                 .build(),
-            MessageIoBuilder::new().build(),
+            MessageIoBuilder::new()
+                .add_input("bandwidth", Self::bandwidth_handler)
+                .add_input("sample_rate", Self::sample_rate_handler)
+                .build(),
             Modulate {
                 m_sf: sf,
-                // m_samp_rate: samp_rate,
-                // m_bw: bw,
+                m_samp_rate: samp_rate,
+                m_bw: bw,
                 // m_number_of_bins: number_of_bins_tmp,
                 m_sync_words: sync_words_tmp,
                 m_os_factor: os_factor_tmp,
                 m_samples_per_symbol: number_of_bins_tmp * os_factor_tmp,
-                m_ninput_items_required: 1,
+                // m_ninput_items_required: 1,
                 m_inter_frame_padding: frame_zero_padd,
                 m_upchirp: ref_upchirp,
                 m_downchirp: ref_downchirp,
@@ -96,6 +99,62 @@ impl Modulate {
             },
         )
         // set_output_multiple(m_samples_per_symbol);
+    }
+
+    #[message_handler]
+    pub fn sample_rate_handler<'a>(
+        &'a mut self,
+        _io: &'a mut WorkIo,
+        _mio: &'a mut MessageIo<Self>,
+        _meta: &'a mut BlockMeta,
+        p: Pmt,
+    ) -> Result<Pmt> {
+        if let Pmt::Usize(new_samp_rate) = p {
+            let os_factor_tmp = new_samp_rate / self.m_bw;
+            let number_of_bins_tmp = 1 << self.m_sf;
+            let (ref_upchirp, ref_downchirp) = build_ref_chirps(self.m_sf, os_factor_tmp);
+            self.m_samples_per_symbol = number_of_bins_tmp * os_factor_tmp;
+            self.m_samp_rate = new_samp_rate;
+            self.m_os_factor = os_factor_tmp;
+            self.m_upchirp = ref_upchirp;
+            self.m_downchirp = ref_downchirp;
+            self.reset();
+        } else {
+            warn! {"PMT to sample_rate_handler was not a usize"}
+        }
+        Ok(Pmt::Null)
+    }
+
+    #[message_handler]
+    pub fn bandwidth_handler<'a>(
+        &'a mut self,
+        _io: &'a mut WorkIo,
+        _mio: &'a mut MessageIo<Self>,
+        _meta: &'a mut BlockMeta,
+        p: Pmt,
+    ) -> Result<Pmt> {
+        if let Pmt::Usize(new_bw) = p {
+            let os_factor_tmp = self.m_samp_rate / new_bw;
+            let number_of_bins_tmp = 1 << self.m_sf;
+            let (ref_upchirp, ref_downchirp) = build_ref_chirps(self.m_sf, os_factor_tmp);
+            self.m_samples_per_symbol = number_of_bins_tmp * os_factor_tmp;
+            self.m_bw = new_bw;
+            self.m_os_factor = os_factor_tmp;
+            self.m_upchirp = ref_upchirp;
+            self.m_downchirp = ref_downchirp;
+            self.reset();
+        } else {
+            warn! {"PMT to bandwidth_handler was not a usize"}
+        }
+        Ok(Pmt::Null)
+    }
+
+    fn reset(&mut self) {
+        self.frame_end = true;
+        self.samp_cnt = -1;
+        self.preamb_samp_cnt = 0;
+        self.frame_cnt = 0;
+        self.m_frame_len = 0; // implicit
     }
 
     // fn set_sf(&mut self, sf: usize) {
@@ -327,7 +386,7 @@ impl Kernel for Modulate {
                     < (self.m_frame_len * self.m_samples_per_symbol + self.m_inter_frame_padding)
                         as isize
             {
-                self.m_ninput_items_required = 0;
+                // self.m_ninput_items_required = 0;
                 let padd_size = min(
                     noutput_items - output_offset,
                     self.m_frame_len * self.m_samples_per_symbol + self.m_inter_frame_padding
@@ -344,7 +403,7 @@ impl Kernel for Modulate {
             {
                 self.samp_cnt += 1;
                 self.frame_cnt += 1;
-                self.m_ninput_items_required = 1;
+                // self.m_ninput_items_required = 1;
                 self.frame_end = true;
                 // #ifdef GR_LORA_PRINT_INFO
                 //                 std::cout << "Frame " << frame_cnt << " sent\n";

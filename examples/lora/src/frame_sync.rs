@@ -184,6 +184,8 @@ impl FrameSync {
                 .add_output::<f32>("log_out")
                 .build(),
             MessageIoBuilder::new()
+                .add_input("bandwidth", Self::bandwidth_handler)
+                .add_input("center_freq", Self::center_freq_handler)
                 .add_input("frame_info", Self::frame_info_handler)
                 .add_input("payload_crc_result", Self::payload_crc_result_handler)
                 // .add_input("noise_est", Self::noise_est_handler)
@@ -273,6 +275,40 @@ impl FrameSync {
                 ready_to_detect: true,
             },
         )
+    }
+
+    #[message_handler]
+    pub fn bandwidth_handler<'a>(
+        &'a mut self,
+        _io: &'a mut WorkIo,
+        _mio: &'a mut MessageIo<Self>,
+        _meta: &'a mut BlockMeta,
+        p: Pmt,
+    ) -> Result<Pmt> {
+        if let Pmt::Usize(new_bw) = p {
+            self.m_bw = new_bw as u32;
+            self.reset();
+        } else {
+            warn! {"PMT to bandwidth_handler was not a usize"}
+        }
+        Ok(Pmt::Null)
+    }
+
+    #[message_handler]
+    pub fn center_freq_handler<'a>(
+        &'a mut self,
+        _io: &'a mut WorkIo,
+        _mio: &'a mut MessageIo<Self>,
+        _meta: &'a mut BlockMeta,
+        p: Pmt,
+    ) -> Result<Pmt> {
+        if let Pmt::Usize(new_center_freq) = p {
+            self.m_center_freq = new_center_freq as u32;
+            self.reset();
+        } else {
+            warn! {"PMT to center_freq_handler was not a usize"}
+        }
+        Ok(Pmt::Null)
     }
 
     fn my_roundf(number: f32) -> isize {

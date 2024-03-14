@@ -24,6 +24,7 @@ use lora::utilities::*;
 
 pub struct Whitening {
     tx_frames: BoundedDiscretePriorityQueue<'static, Vec<u8>, u8>,
+    quickstart_counter: usize,
 }
 
 const MAX_FRAMES: usize = 128;
@@ -48,6 +49,7 @@ impl Whitening {
                 .build(),
             Whitening {
                 tx_frames: BoundedDiscretePriorityQueue::new(MAX_FRAMES, &PRIORITY_VALUES),
+                quickstart_counter: 0,
             },
         )
     }
@@ -61,6 +63,7 @@ impl Whitening {
         _p: Pmt,
     ) -> Result<Pmt> {
         self.tx_frames.flush();
+        self.quickstart_counter = 0;
         Ok(Pmt::Null)
     }
 
@@ -75,6 +78,13 @@ impl Whitening {
         if let Pmt::Blob(data) = p {
             {
                 let priority = get_dscp_priority(&data);
+                if priority == 0 {
+                    if self.quickstart_counter < 1000 {
+                        self.quickstart_counter += 1;
+                        return Ok(Pmt::Null);
+                    }
+                    // TODO fake dropping non-priority for demo to get rid of long "transition time" due to large buffer count
+                }
                 self.tx_frames.push_back(data, priority);
                 io.call_again = true;
             }

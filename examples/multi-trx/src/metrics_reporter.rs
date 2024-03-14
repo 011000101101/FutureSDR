@@ -92,34 +92,38 @@ impl MetricsReporter {
         direction: &str,
     ) -> Result<Pmt> {
         if let Pmt::Blob(buf) = p {
-            let dscp_val = buf[TUN_INTERFACE_HEADER_LEN + 1];
-            let next_protocol = buf[TUN_INTERFACE_HEADER_LEN + 9];
-            let timestamp = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs_f64();
-            let mut s = DefaultHasher::new();
-            buf.hash(&mut s);
-            let hash = s.finish();
-            if let Err(_) = self
-                .socket_metrics
-                .send(
-                    format!(
-                        "{},{},{},{},{},{},{}",
-                        self.local_ip,
-                        direction,
-                        buf.len(),
-                        dscp_val,
-                        next_protocol,
-                        hash,
-                        timestamp
+            if buf.len() >= TUN_INTERFACE_HEADER_LEN + 10 {
+                let dscp_val = buf[TUN_INTERFACE_HEADER_LEN + 1];
+                let next_protocol = buf[TUN_INTERFACE_HEADER_LEN + 9];
+                let timestamp = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs_f64();
+                let mut s = DefaultHasher::new();
+                buf.hash(&mut s);
+                let hash = s.finish();
+                if let Err(_) = self
+                    .socket_metrics
+                    .send(
+                        format!(
+                            "{},{},{},{},{},{},{}",
+                            self.local_ip,
+                            direction,
+                            buf.len(),
+                            dscp_val,
+                            next_protocol,
+                            hash,
+                            timestamp
+                        )
+                        .as_bytes(),
                     )
-                    .as_bytes(),
-                )
-                .await
-            {
-                // if let Err(_) = self.socket_metrics.send(format!("{},{}", self.local_ip, direction).as_bytes()).await {
-                warn!("could not send metric update.");
+                    .await
+                {
+                    // if let Err(_) = self.socket_metrics.send(format!("{},{}", self.local_ip, direction).as_bytes()).await {
+                    warn!("could not send metric update.");
+                }
+            } else {
+                warn!("metrics reporter received invalid IP frame: {:?}.", buf);
             }
         } else {
             warn!("pmt to tx was not a blob");

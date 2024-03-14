@@ -726,6 +726,9 @@ class Ui(QtWidgets.QMainWindow):
             partial(self.select_path_loss_function, new_index=4, invoked_in_gui=True)
         )
 
+        self.lineEdit_2.setEnabled(False)
+        self.lineEdit_7.setEnabled(False)
+
         # start background workers
         for _, thread in self.workers:
             thread.start()
@@ -755,8 +758,8 @@ class Ui(QtWidgets.QMainWindow):
             self.select_path_loss_function(True, 0, invoked_in_gui=False)
             self.stackedWidget.setCurrentIndex(1)
             self.tabWidget.setEnabled(True)
-            self.lineEdit_2.setEnabled(True)
-            self.lineEdit_7.setEnabled(True)
+#             self.lineEdit_2.setEnabled(True)
+#             self.lineEdit_7.setEnabled(True)
             self.groupBox_3.setEnabled(True)
             self.radio_button_wifi.setEnabled(True)
             self.radio_button_zigbee.setEnabled(True)
@@ -1239,7 +1242,7 @@ class Ui(QtWidgets.QMainWindow):
         self.lineEdit.setText("4")
         self.lineEdit_6.setText("60")
         # self.lineEdit_6.setEnabled(False)
-        self.lineEdit_5.setText("25")
+        self.lineEdit_5.setText("45")
         # self.lineEdit_5.setEnabled(False)
         self.lineEdit_13.setText("10")
         # self.lineEdit_13.setEnabled(False)
@@ -1249,10 +1252,10 @@ class Ui(QtWidgets.QMainWindow):
         self.lineEdit_3.setText("-4")
         self.lineEdit_2.setText("2.45")
         # self.lineEdit_10.setText("4")  # zigbee
-        self.lineEdit_10.setText("0.5")  # LoRa
+        self.lineEdit_10.setText("1")  # LoRa
         self.lineEdit_17.setText("60")
         # self.lineEdit_17.setEnabled(False)
-        self.lineEdit_18.setText("25")
+        self.lineEdit_18.setText("45")
         # self.lineEdit_18.setEnabled(False)
         self.lineEdit_19.setText("10")
         # self.lineEdit_19.setEnabled(False)

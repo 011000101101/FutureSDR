@@ -1,7 +1,7 @@
 // use futures::AsyncReadExt;
 // use futures::AsyncWriteExt;
 use futuresdr::anyhow::Result;
-use futuresdr::log::{debug, warn};
+use futuresdr::log::warn;
 use futuresdr::macros::async_trait;
 use futuresdr::macros::message_handler;
 use futuresdr::num_complex::Complex32;

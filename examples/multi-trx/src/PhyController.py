@@ -1,5 +1,6 @@
 import requests
 from typing import Optional
+import time
 
 
 class PhyController:
@@ -44,6 +45,8 @@ class PhyController:
         message_selector_id = -1
         soapy_source_id = -1
         soapy_sink_id = -1
+        lora_frame_sync_id = -1
+        lora_modulate_id = -1
 
         for block in self.blocks:
             # print(block["instance_name"])
@@ -57,6 +60,10 @@ class PhyController:
                 soapy_sink_id = block["id"]
             if block["instance_name"] == "Source_0":
                 soapy_source_id = block["id"]
+            if "FrameSync" in block["instance_name"]:
+                lora_frame_sync_id = block["id"]
+            if "Modulate" in block["instance_name"]:
+                lora_modulate_id = block["id"]
 
         if (source_selector_id == -1) or (sink_selector_id == -1) or (soapy_source_id == -1) or (
                 soapy_sink_id == -1) or (message_selector_id == -1):
@@ -82,6 +89,12 @@ class PhyController:
         self.soapy_sink_gain_url = "{0}block/{1}/call/1/".format(url, soapy_sink_id)
         self.soapy_sink_sample_rate_url = "{0}block/{1}/call/2/".format(url, soapy_sink_id)
         self.soapy_sink_freq_offset_url = "{0}block/{1}/call/4/".format(url, soapy_sink_id)
+
+
+        self.lora_frame_sync_center_freq_url = "{0}block/{1}/call/1/".format(url, lora_frame_sync_id)
+        self.lora_frame_sync_bw_url = "{0}block/{1}/call/0/".format(url, lora_frame_sync_id)
+        self.lora_modulate_bw_url = "{0}block/{1}/call/0/".format(url, lora_modulate_id)
+        self.lora_modulate_sr_url = "{0}block/{1}/call/1/".format(url, lora_modulate_id)
 
     def use_center_frequency_offset_mode(self, use: bool):
         """
@@ -237,17 +250,22 @@ class PhyController:
         requests.post(self.soapy_source_sample_rate_url, json={"F64": int(self.sample_rate[phy])})
         requests.post(self.soapy_sink_gain_url, json={"F64": int(self.tx_gain[phy])})
         requests.post(self.soapy_sink_sample_rate_url, json={"F64": int(self.sample_rate[phy])})
+#         if phy == 1:
+# # #             requests.post(self.lora_frame_sync_center_freq_url, json={"Usize": int(self.center_freq) - int(self.rx_freq_offset[phy])})
+#             requests.post(self.lora_frame_sync_bw_url, json={"Usize": int(self.sample_rate[phy])})
+#             requests.post(self.lora_modulate_bw_url, json={"Usize": int(self.sample_rate[phy])})
+#             requests.post(self.lora_modulate_sr_url, json={"Usize": int(self.sample_rate[phy])})
         if self.center_offset_mode:
-            # requests.post(
-            #     self.soapy_source_freq_url,
-            #     # json={"VecPmt": [{"F64": int(self.center_freq)}, {"U32": self.rx_device_channel}]}  # TODO
-            #     json={"F64": int(self.center_freq)}
-            # )
-            # requests.post(
-            #     self.soapy_sink_freq_url,
-            #     # json={"VecPmt": [{"F64": int(self.center_freq)}, {"U32": self.tx_device_channel}]}
-            #     json={"F64": int(self.center_freq)}
-            # )
+#             requests.post(
+#                 self.soapy_source_freq_url,
+#                 # json={"VecPmt": [{"F64": int(self.center_freq)}, {"U32": self.rx_device_channel}]}  # TODO
+#                 json={"F64": int(self.center_freq)}
+#             )
+#             requests.post(
+#                 self.soapy_sink_freq_url,
+#                 # json={"VecPmt": [{"F64": int(self.center_freq)}, {"U32": self.tx_device_channel}]}
+#                 json={"F64": int(self.center_freq)}
+#             )
             pass
         else:
             raise NotImplementedError()

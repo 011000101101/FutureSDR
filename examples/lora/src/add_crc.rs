@@ -1,6 +1,6 @@
 use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
-use std::cmp::{max, min};
+use std::cmp::min;
 
 // use futuresdr::futures::FutureExt;
 

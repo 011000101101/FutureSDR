@@ -215,9 +215,8 @@ struct Args {
 const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 8 * MAX_ENCODED_BITS; // TODO maybe this
                                                                                 // const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize = 8192 * 4 * 8 * 16;
 const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize =
-    LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST * 4; // 8192 * 4 * 16; // sufficient for SF8
+    LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST * 16; // 8192 * 4 * 16; // sufficient for SF8
 
-const LORA_BW: usize = 500000;
 const LORA_SF: usize = 7;
 
 const DSCP_EF: u8 = 0b101110 << 2;
@@ -271,6 +270,8 @@ fn main() -> Result<()> {
     let rx_gain = [args.wlan_rx_gain, args.zigbee_rx_gain];
     let tx_gain = [args.wlan_tx_gain, args.zigbee_tx_gain];
     let sample_rate = [args.wlan_sample_rate, args.zigbee_sample_rate];
+
+    let mut bw_changed_handler_lora: Vec<(usize, usize)> = vec![];
 
     let mut fg = Flowgraph::new();
 
@@ -573,19 +574,28 @@ fn main() -> Result<()> {
     let header = Header::new(impl_head, has_crc, cr);
     let add_crc = AddCrc::new(has_crc);
     let hamming_enc = HammingEnc::new(cr, LORA_SF);
-    let interleaver = Interleaver::new(cr as usize, LORA_SF, 0, LORA_BW);
+    let interleaver = Interleaver::new(cr as usize, LORA_SF, 0, args.zigbee_sample_rate as usize);
     let gray_demap = GrayDemap::new(LORA_SF);
     let modulate = Modulate::new(
         LORA_SF,
-        LORA_BW as usize,
-        LORA_BW,
+        args.zigbee_sample_rate as usize,
+        args.zigbee_sample_rate as usize,
         // vec![8, 16],
         // vec![42, 12],
         vec![8, 16],
         // 20 * (1 << args.spreading_factor) * args.sample_rate as usize / args.bandwidth,
-        200 * (1 << LORA_SF) * LORA_BW / LORA_BW,
+        20 * (1 << LORA_SF),
         Some(8),
     );
+    let modulate_bw_port = modulate
+        .message_input_name_to_id("bandwidth")
+        .expect("No bandwidth port found!");
+    let modulate_sr_port = modulate
+        .message_input_name_to_id("sample_rate")
+        .expect("No sample_rate port found!");
+    let modulate = fg.add_block(modulate);
+    bw_changed_handler_lora.push((modulate, modulate_bw_port));
+    bw_changed_handler_lora.push((modulate, modulate_sr_port));
 
     let zigbee_mac_queue_flush_input_port_id = whitening
         .message_input_name_to_id("flush_queue")
@@ -608,14 +618,23 @@ fn main() -> Result<()> {
     let soft_decoding: bool = false;
     // let downsample = FirBuilder::new_resampling::<Complex32, Complex32>(5, 8);
     let frame_sync = FrameSync::new(
+        // center_freq[1] as u32 - rx_freq_offset[1] as u32,  // TODO
         center_freq[1] as u32 - rx_freq_offset[1] as u32,
-        LORA_BW as u32,
+        args.zigbee_sample_rate as u32,
         LORA_SF,
         false,
         vec![8, 16],
         1,
         None,
     );
+    let frame_sync_bw_port = frame_sync
+        .message_input_name_to_id("bandwidth")
+        .expect("No bandwidth port found!");
+    let frame_sync_center_freq_port = frame_sync
+        .message_input_name_to_id("center_freq")
+        .expect("No bandwidth port found!");
+    let frame_sync = fg.add_block(frame_sync);
+    bw_changed_handler_lora.push((frame_sync, frame_sync_bw_port));
     let null_sink = NullSink::<f32>::new();
     let fft_demod = FftDemod::new(soft_decoding, true, LORA_SF);
     let gray_mapping = GrayMapping::new(soft_decoding);
@@ -910,6 +929,16 @@ fn main() -> Result<()> {
                                         Pmt::VecPmt(vec![Pmt::F64(tx_freq_offset[new_index as usize]), Pmt::U32(args.soapy_tx_channel as u32)])
                                     )
                             ).unwrap();
+                            if new_protocol_index as usize == PROTOCOL_INDEX_ZIGBEE {
+                                block_on(
+                                    input_handle
+                                        .call(
+                                            frame_sync,
+                                            frame_sync_center_freq_port,
+                                            Pmt::Usize((center_freq[PROTOCOL_INDEX_ZIGBEE] - rx_freq_offset[PROTOCOL_INDEX_ZIGBEE]) as usize),
+                                        )
+                                ).unwrap();
+                            }
                         }
                         block_on(
                             input_handle
@@ -968,6 +997,16 @@ fn main() -> Result<()> {
                                     Pmt::Null,
                                 )
                             ).unwrap();
+                            for (block, port) in &bw_changed_handler_lora {
+                                block_on(
+                                    input_handle
+                                        .call(
+                                            *block,
+                                            *port,
+                                            Pmt::Usize(sample_rate[PROTOCOL_INDEX_ZIGBEE] as usize),
+                                        )
+                                ).unwrap();
+                            }
                         }
                         else if new_protocol_index as usize == PROTOCOL_INDEX_WIFI {
                             block_on(
