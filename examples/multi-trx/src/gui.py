@@ -82,7 +82,7 @@ RX_PORT_POSITION = 1342
 # ]
 
 MAX_PATH_LOSS_FOR_PLOTTING = 120
-PLOTTING_INTERVAL_MS = 1000
+PLOTTING_INTERVAL_MS = 100
 RATE_SMOOTHING_FACTOR = 1
 """
 averages rate over the last x intervals for smoother plotting
@@ -235,6 +235,7 @@ class MyFigureCanvas(FigureCanvas):
         super().__init__(plt.Figure(tight_layout=True))
         # Range settings
         self._x_len_ = x_len
+        steps_per_second = int(1000 / interval)
         self._y_range_ = y_range
         self.data_getter_callback = data_getter_callback
 
@@ -243,12 +244,12 @@ class MyFigureCanvas(FigureCanvas):
         # Store a figure ax
         self._ax_ = self.figure.subplots()
         if not small:
-            self._ax_.set_xticks([0, 29, 59, 89, 119], ["-2min", "-1.5min", "-1min", "-30sek", "0"])
+            self._ax_.set_xticks([loc * steps_per_second for loc in [0, 29, 59, 89, 119]], ["-2min", "-1.5min", "-1min", "-30sek", "0"])
             # self._ax_.set_xlabel("Time")
             if y_label is not None:
                 self._ax_.set_ylabel(y_label, labelpad=y_label_pad)
         else:
-            self._ax_.set_xticks([0, 9, 19, 29, 39, 49, 59], ["-60", "-50", "-40", "-30", "-20", "-10", "0"])
+            self._ax_.set_xticks([loc * steps_per_second for loc in [0, 9, 19, 29, 39, 49, 59]], ["-60", "-50", "-40", "-30", "-20", "-10", "0"])
         if y_range is not None:
             y_range_size = self._y_range_[1] - self._y_range_[0]
             self._ax_.set_ylim(
@@ -258,7 +259,7 @@ class MyFigureCanvas(FigureCanvas):
         self._ax_.set_yscale(y_scale)
         if y_ticks is not None:
             self._ax_.set_yticks(*y_ticks)
-        self.lines = [self.Line(self._ax_, x_len) for _ in range(num_lines)]
+        self.lines = [self.Line(self._ax_, int(x_len * 1000 / PLOTTING_INTERVAL_MS)) for _ in range(num_lines)]
         if legend is not None:
             self._legend = plt.legend(**legend, bbox_transform=self.figure.transFigure)
             self._ax_.draw_artist(self._legend)
