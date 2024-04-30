@@ -73,6 +73,7 @@ impl fmt::Display for DropPolicy {
 enum State {
     FrameStart,
     Copy(usize),
+    Flush
 }
 
 /// Forward the input stream with a given index to the output stream with a
@@ -107,6 +108,7 @@ where
             MessageIoBuilder::<Self>::new()
                 .add_input("input_index", Self::input_index)
                 .add_input("output_index", Self::output_index)
+                .add_input("flush", Self::flush_handler)
                 .build(),
             Selector {
                 input_index: 0,
@@ -116,6 +118,19 @@ where
                 state: State::FrameStart,
             },
         )
+    }
+
+    #[message_handler]
+    async fn flush_handler(
+        &mut self,
+        io: &mut WorkIo,
+        _mio: &mut MessageIo<Self>,
+        _meta: &mut BlockMeta,
+        _p: Pmt,
+    ) -> Result<Pmt> {
+        self.state = State::Flush;
+        io.call_again = true;
+        Ok(Pmt::Null)
     }
 
     #[message_handler]
@@ -268,6 +283,12 @@ where
                         consumed += n_to_produce;
                         self.state = State::Copy(left - n_to_produce);
                     }
+                }
+                State::Flush => {
+                    sio.input(self.input_index).consume(i.len());
+                    self.state = State::FrameStart;
+                    io.call_again = true;
+                    return Ok(());
                 }
             }
         }

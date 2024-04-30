@@ -64,3 +64,5 @@ rand_distr = "0.4.3"
 seify = { version = "=0.10.0", features = ["aaronia_http"] }
 packet-builder = "0.7.0"
 pnet = "0.34.0"
+serde_json = "1.0.105"
+serde = { version = "1.0.185", features = ["derive"] }

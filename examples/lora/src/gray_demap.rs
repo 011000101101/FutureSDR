@@ -1,9 +1,9 @@
 use futuresdr::anyhow::Result;
-use futuresdr::macros::async_trait;
+use futuresdr::macros::{async_trait, message_handler};
 // use futuresdr::log::info;
 use std::cmp::min;
 
-use futuresdr::runtime::BlockMeta;
+use futuresdr::runtime::{BlockMeta, Pmt};
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
@@ -19,6 +19,7 @@ use crate::utilities::*;
 
 pub struct GrayDemap {
     m_sf: usize,
+    flush: bool,
 }
 
 impl GrayDemap {
@@ -29,9 +30,30 @@ impl GrayDemap {
                 .add_input::<u16>("in")
                 .add_output::<u16>("out")
                 .build(),
-            MessageIoBuilder::new().build(),
-            GrayDemap { m_sf: sf },
+            MessageIoBuilder::new()
+                .add_input("flush_queue", Self::flush_queue)
+                .add_output("flush_propagate")
+                .build(),
+            GrayDemap {
+                m_sf: sf,
+                flush: false,
+            },
         )
+    }
+
+    #[message_handler]
+    pub fn flush_queue<'a>(
+        &'a mut self,
+        io: &'a mut WorkIo,
+        mio: &'a mut MessageIo<Self>,
+        _meta: &'a mut BlockMeta,
+        _p: Pmt,
+    ) -> Result<Pmt> {
+        self.flush = true;
+        let flush_out_port_id = mio.output_name_to_id("flush_propagate").unwrap();
+        mio.output_mut(flush_out_port_id).post(Pmt::Null).await;
+        io.call_again = true;
+        Ok(Pmt::Null)
     }
 
     // fn set_sf(&mut self, sf: usize) {
@@ -43,12 +65,21 @@ impl GrayDemap {
 impl Kernel for GrayDemap {
     async fn work(
         &mut self,
-        _io: &mut WorkIo,
+        io: &mut WorkIo,
         sio: &mut StreamIo,
         _m: &mut MessageIo<Self>,
         _b: &mut BlockMeta,
     ) -> Result<()> {
         let input = sio.input(0).slice::<u16>();
+
+        if self.flush {
+            let count = input.len();
+            sio.input(0).consume(count);
+            self.flush = false;
+            io.call_again = true;
+            return Ok(());
+        }
+
         let out = sio.output(0).slice::<u16>();
         let nitems_to_process = min(input.len(), out.len());
         let tags: Vec<(usize, Tag)> = sio

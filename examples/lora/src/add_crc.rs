@@ -1,5 +1,5 @@
 use futuresdr::anyhow::Result;
-use futuresdr::macros::async_trait;
+use futuresdr::macros::{async_trait, message_handler};
 use std::cmp::min;
 
 // use futuresdr::futures::FutureExt;
@@ -24,6 +24,7 @@ pub struct AddCrc {
     m_payload_len: usize, // length of the payload in Bytes
     m_frame_len: usize,   // length of the frame in number of gnuradio items
     m_cnt: usize,         // counter of the number of symbol in frame
+    flush: bool,
 }
 
 impl AddCrc {
@@ -34,15 +35,34 @@ impl AddCrc {
                 .add_input::<u8>("in")
                 .add_output::<u8>("out")
                 .build(),
-            MessageIoBuilder::new().build(),
+            MessageIoBuilder::new()
+                .add_input("flush_queue", Self::flush_queue)
+                .add_output("flush_propagate")
+                .build(),
             AddCrc {
                 m_has_crc: has_crc,
                 m_payload: vec![],
                 m_payload_len: 0, // implicit
                 m_frame_len: 0,
                 m_cnt: 0,
+                flush: false,
             },
         )
+    }
+
+    #[message_handler]
+    pub fn flush_queue<'a>(
+        &'a mut self,
+        io: &'a mut WorkIo,
+        mio: &'a mut MessageIo<Self>,
+        _meta: &'a mut BlockMeta,
+        _p: Pmt,
+    ) -> Result<Pmt> {
+        self.flush = true;
+        let flush_out_port_id = mio.output_name_to_id("flush_propagate").unwrap();
+        mio.output_mut(flush_out_port_id).post(Pmt::Null).await;
+        io.call_again = true;
+        Ok(Pmt::Null)
     }
 
     fn crc16(crc_value_in: u16, new_byte_tmp: u8) -> u16 {
@@ -64,12 +84,25 @@ impl AddCrc {
 impl Kernel for AddCrc {
     async fn work(
         &mut self,
-        _io: &mut WorkIo,
+        io: &mut WorkIo,
         sio: &mut StreamIo,
         _m: &mut MessageIo<Self>,
         _b: &mut BlockMeta,
     ) -> Result<()> {
         let input = sio.input(0).slice::<u8>();
+
+        if self.flush {
+            let count = input.len();
+            sio.input(0).consume(count);
+            self.m_payload = vec![];
+            self.m_payload_len = 0;
+            self.m_frame_len = 0;
+            self.m_cnt = 0;
+            self.flush = false;
+            io.call_again = true;
+            return Ok(());
+        }
+
         let out = sio.output(0).slice::<u8>();
         let noutput_items = out.len().saturating_sub(4);
         let mut nitems_to_process = min(input.len(), noutput_items);

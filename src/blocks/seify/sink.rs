@@ -31,6 +31,7 @@ pub struct Sink<D: DeviceTrait + Clone> {
     streamer: Option<D::TxStreamer>,
     start_time: Option<i64>,
     driver: Option<Driver>,
+    flush: bool,
 }
 
 impl<D: DeviceTrait + Clone> Sink<D> {
@@ -60,6 +61,7 @@ impl<D: DeviceTrait + Clone> Sink<D> {
                 .add_input("sample_rate", Self::sample_rate_handler)
                 .add_input("cmd", Self::cmd_handler)
                 .add_input("freq_offset", Self::freq_offset_handler)
+                .add_input("flush", Self::flush_handler)
                 .build(),
             Self {
                 channels,
@@ -67,8 +69,21 @@ impl<D: DeviceTrait + Clone> Sink<D> {
                 start_time,
                 streamer: None,
                 driver: driver,
+                flush: false,
             },
         )
+    }
+
+    #[message_handler]
+    fn flush_handler(
+        &mut self,
+        _io: &mut WorkIo,
+        _mio: &mut MessageIo<Self>,
+        _meta: &mut BlockMeta,
+        _p: Pmt,
+    ) -> Result<Pmt> {
+        self.flush = true;
+        Ok(Pmt::Ok)
     }
 
     #[message_handler]
@@ -188,6 +203,21 @@ impl<D: DeviceTrait + Clone> Kernel for Sink<D> {
         _mio: &mut MessageIo<Self>,
         _meta: &mut BlockMeta,
     ) -> Result<()> {
+        if self.flush {
+            let lens: Vec<usize> = sio
+                .inputs_mut()
+                .iter_mut()
+                .map(|b| b.slice::<Complex32>().len())
+                .collect();
+            sio.inputs_mut()
+                .iter_mut()
+                .zip(&lens)
+                .for_each(|(i, &n)| i.consume(n));
+            self.flush = false;
+            io.call_again = true;
+            return Ok(());
+        }
+
         let bufs: Vec<&[Complex32]> = sio
             .inputs_mut()
             .iter_mut()

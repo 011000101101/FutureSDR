@@ -42,6 +42,7 @@ pub struct Modulate {
     padd_cnt: usize,        // counter of the number of null symbols output after each frame
     frame_cnt: u64,         // counter of the number of frame sent
     frame_end: bool,        // indicate that we send a full frame
+    flush: bool,
 }
 
 impl Modulate {
@@ -76,6 +77,8 @@ impl Modulate {
             MessageIoBuilder::new()
                 .add_input("bandwidth", Self::bandwidth_handler)
                 .add_input("sample_rate", Self::sample_rate_handler)
+                .add_input("flush_queue", Self::flush_queue)
+                .add_output("flush_propagate")
                 .build(),
             Modulate {
                 m_sf: sf,
@@ -96,9 +99,25 @@ impl Modulate {
                 frame_cnt: 0,
                 padd_cnt: frame_zero_padd,
                 m_frame_len: 0, // implicit
+                flush: false,
             },
         )
         // set_output_multiple(m_samples_per_symbol);
+    }
+
+    #[message_handler]
+    pub fn flush_queue<'a>(
+        &'a mut self,
+        io: &'a mut WorkIo,
+        mio: &'a mut MessageIo<Self>,
+        _meta: &'a mut BlockMeta,
+        _p: Pmt,
+    ) -> Result<Pmt> {
+        self.flush = true;
+        let flush_out_port_id = mio.output_name_to_id("flush_propagate").unwrap();
+        mio.output_mut(flush_out_port_id).post(Pmt::Null).await;
+        io.call_again = true;
+        Ok(Pmt::Null)
     }
 
     #[message_handler]
@@ -155,6 +174,7 @@ impl Modulate {
         self.preamb_samp_cnt = 0;
         self.frame_cnt = 0;
         self.m_frame_len = 0; // implicit
+        self.flush = false;
     }
 
     // fn set_sf(&mut self, sf: usize) {
@@ -173,12 +193,21 @@ impl Modulate {
 impl Kernel for Modulate {
     async fn work(
         &mut self,
-        _io: &mut WorkIo,
+        io: &mut WorkIo,
         sio: &mut StreamIo,
         _m: &mut MessageIo<Self>,
         _b: &mut BlockMeta,
     ) -> Result<()> {
         let input = sio.input(0).slice::<u16>();
+
+        if self.flush {
+            let count = input.len();
+            sio.input(0).consume(count);
+            self.reset();
+            io.call_again = true;
+            return Ok(());
+        }
+
         let out = sio.output(0).slice::<Complex32>();
         let mut nitems_to_process = input.len();
         let noutput_items: usize = out.len();
@@ -411,7 +440,9 @@ impl Kernel for Modulate {
             }
             // if (nitems_to_process)
             //     std::cout << ninput_items[0] << " " << nitems_to_process << " " << output_offset << " " << noutput_items << std::endl;
-            // info! {"Modulate: producing {} samples.", output_offset};
+            // if output_offset > 0 {
+            //     println! {"Modulate: producing {} samples.", output_offset};
+            // }
             sio.input(0).consume(nitems_to_process);
             sio.output(0).produce(output_offset);
         }

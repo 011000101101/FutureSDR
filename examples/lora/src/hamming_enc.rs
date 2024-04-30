@@ -1,8 +1,8 @@
 use futuresdr::anyhow::Result;
-use futuresdr::macros::async_trait;
+use futuresdr::macros::{async_trait, message_handler};
 use std::cmp::min;
 
-use futuresdr::runtime::BlockMeta;
+use futuresdr::runtime::{BlockMeta, Pmt};
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
@@ -20,6 +20,7 @@ pub struct HammingEnc {
     m_cr: u8,     // Transmission coding rate
     m_sf: usize,  // Transmission spreading factor
     m_cnt: usize, // count the number of processed items in the current frame
+    flush: bool,
 }
 
 impl HammingEnc {
@@ -30,14 +31,33 @@ impl HammingEnc {
                 .add_input::<u8>("in")
                 .add_output::<u8>("out")
                 .build(),
-            MessageIoBuilder::new().build(),
+            MessageIoBuilder::new()
+                .add_input("flush_queue", Self::flush_queue)
+                .add_output("flush_propagate")
+                .build(),
             HammingEnc {
                 m_sf: sf,
                 m_cr: cr,
                 m_cnt: 0, // implicit
+                flush: false,
             },
         )
         // set_tag_propagation_policy(TPP_ONE_TO_ONE);  // TODO
+    }
+
+    #[message_handler]
+    pub fn flush_queue<'a>(
+        &'a mut self,
+        io: &'a mut WorkIo,
+        mio: &'a mut MessageIo<Self>,
+        _meta: &'a mut BlockMeta,
+        _p: Pmt,
+    ) -> Result<Pmt> {
+        self.flush = true;
+        let flush_out_port_id = mio.output_name_to_id("flush_propagate").unwrap();
+        mio.output_mut(flush_out_port_id).post(Pmt::Null).await;
+        io.call_again = true;
+        Ok(Pmt::Null)
     }
 
     // fn set_cr(&mut self, cr: u8) {
@@ -57,12 +77,22 @@ impl HammingEnc {
 impl Kernel for HammingEnc {
     async fn work(
         &mut self,
-        _io: &mut WorkIo,
+        io: &mut WorkIo,
         sio: &mut StreamIo,
         _m: &mut MessageIo<Self>,
         _b: &mut BlockMeta,
     ) -> Result<()> {
         let input = sio.input(0).slice::<u8>();
+
+        if self.flush {
+            let count = input.len();
+            sio.input(0).consume(count);
+            self.m_cnt = 0;
+            self.flush = false;
+            io.call_again = true;
+            return Ok(());
+        }
+
         let out = sio.output(0).slice::<u8>();
         let mut nitems_to_process = min(input.len(), out.len());
         let tags: Vec<(usize, Tag)> = sio

@@ -1049,10 +1049,9 @@ impl FrameSync {
         // if self.m_sto_frac.abs() > 0.5 {
         //     self.m_sto_frac += if self.m_sto_frac > 0. { -1. } else { 1. };
         // }
-        if self.m_sto_frac * 2.0 > 1.0 {
+        if self.m_sto_frac > 0.0 {
             self.m_sto_frac -= 1.0;
-        } else if self.m_sto_frac * 2.0 <= -1.0 {
-            self.m_sto_frac += 1.0;
+            items_to_consume += 1;
         }
         // decim net id according to new sto_frac and sto int
         // start_off gives the offset in the net_id_samp vector required to be aligned in time (CFOint is equivalent to STOint at this point, since upchirp_val was forced to 0, and initial alignment has already been performed. note that CFOint here is only the remainder of STOint that needs to be re-aligned.)

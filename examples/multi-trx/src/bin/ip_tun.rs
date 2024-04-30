@@ -7,6 +7,7 @@ use std::time::Duration;
 // use futures::StreamExt;
 // use futures::sink::SinkExt;
 use std::net::Ipv4Addr;
+use serde::{Deserialize, Serialize};
 use tokio;
 // use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 // use packet::ip::Packet;
@@ -57,7 +58,6 @@ use futuresdr::blocks::Delay as WlanDelay;
 use wlan::fft_tag_propagation as wlan_fft_tag_propagation;
 use wlan::parse_channel as wlan_parse_channel;
 use wlan::Decoder as WlanDecoder;
-use wlan::MAX_ENCODED_BITS;
 use wlan::MAX_PAYLOAD_SIZE;
 // use wlan::Encoder as WlanEncoder;
 use multitrx::Encoder as WlanEncoder;
@@ -211,13 +211,28 @@ struct Args {
     flow_priority_file: String,
 }
 
-// const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 1122580;  // TODO maybe this
-const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 8 * MAX_ENCODED_BITS; // TODO maybe this
-                                                                                // const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize = 8192 * 4 * 8 * 16;
-const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize =
-    LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST * 16; // 8192 * 4 * 16; // sufficient for SF8
+#[derive(Serialize, Deserialize)]
+struct PhyUpdate {
+    phy: usize,
+    center_freq: f64,
+    freq_offset_source: f64,
+    freq_offset_sink: f64,
+    gain_rx: f64,
+    gain_tx: f64,
+    sample_rate: f64,
+}
 
 const LORA_SF: usize = 7;
+
+// const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 1122580;  // TODO maybe this
+// const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = 8 * MAX_ENCODED_BITS; // TODO maybe this
+//                                                                                 // const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize = 8192 * 4 * 8 * 16;
+const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize = (1 << LORA_SF) * 256 * 4 * 4;
+const LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST: usize = LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME;
+// const LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME: usize =
+//     LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST * 16; // 8192 * 4 * 16; // sufficient for SF8
+const LORA_MAX_PAYLOAD_SIZE: usize = 255 - 4; // 256 bytes max frame size - 4 bytes TUN metadata
+const LORA_MAX_FRAME_SIZE: usize = 2 * (255 + 16);  // samples
 
 const DSCP_EF: u8 = 0b101110 << 2;
 const NUM_PROTOCOLS: usize = 2;
@@ -225,7 +240,8 @@ const PROTOCOL_INDEX_WIFI: usize = 0;
 const PROTOCOL_INDEX_ZIGBEE: usize = 1;
 static MTU_VALUES: [usize; NUM_PROTOCOLS] = [
     MAX_PAYLOAD_SIZE, // WiFi
-    256 - 4 - 5 - 2, // Zigbee: 256 bytes max frame size - 4 bytes TUN metadata - 5 bytes mac header - 2 bytes mac footer (checksum)
+    // 256 - 4 - 5 - 2, // Zigbee: 256 bytes max frame size - 4 bytes TUN metadata - 5 bytes mac header - 2 bytes mac footer (checksum)
+    LORA_MAX_PAYLOAD_SIZE,
 ];
 // use phf::phf_map;
 // static FLOW_PRIORITY_MAP: phf::Map<u16, u8> = phf_map! {
@@ -264,12 +280,12 @@ fn main() -> Result<()> {
 
     let rx_freq = [args.wlan_rx_channel, args.zigbee_rx_channel];
     let tx_freq = [args.wlan_tx_channel, args.zigbee_tx_channel];
-    let center_freq = [args.wlan_center_freq, args.zigbee_center_freq];
-    let rx_freq_offset = [args.wlan_rx_freq_offset, args.zigbee_rx_freq_offset];
-    let tx_freq_offset = [args.wlan_tx_freq_offset, args.zigbee_tx_freq_offset];
-    let rx_gain = [args.wlan_rx_gain, args.zigbee_rx_gain];
-    let tx_gain = [args.wlan_tx_gain, args.zigbee_tx_gain];
-    let sample_rate = [args.wlan_sample_rate, args.zigbee_sample_rate];
+    let mut center_freq = [args.wlan_center_freq, args.zigbee_center_freq];
+    let mut rx_freq_offset = [args.wlan_rx_freq_offset, args.zigbee_rx_freq_offset];
+    let mut tx_freq_offset = [args.wlan_tx_freq_offset, args.zigbee_tx_freq_offset];
+    let mut rx_gain = [args.wlan_rx_gain, args.zigbee_rx_gain];
+    let mut tx_gain = [args.wlan_tx_gain, args.zigbee_tx_gain];
+    let mut sample_rate = [args.wlan_sample_rate, args.zigbee_sample_rate];
 
     let mut bw_changed_handler_lora: Vec<(usize, usize)> = vec![];
 
@@ -386,6 +402,9 @@ fn main() -> Result<()> {
     let sink_gain_input_port_id = sink
         .message_input_name_to_id("gain")
         .expect("No gain port found!");
+    let sink_queue_flush_input_port_id = sink
+        .message_input_name_to_id("flush")
+        .expect("No flush port found!");
     let sink = fg.add_block(sink);
 
     let src_freq_input_port_id = src
@@ -407,6 +426,9 @@ fn main() -> Result<()> {
     let input_index_port_id = sink_selector
         .message_input_name_to_id("input_index")
         .expect("No input_index port found!");
+    let sink_selector_queue_flush_input_port_id = sink_selector
+        .message_input_name_to_id("flush")
+        .expect("No flush port found!");
     let sink_selector = fg.add_block(sink_selector);
     fg.connect_stream_with_type(
         sink_selector,
@@ -597,7 +619,7 @@ fn main() -> Result<()> {
     bw_changed_handler_lora.push((modulate, modulate_bw_port));
     bw_changed_handler_lora.push((modulate, modulate_sr_port));
 
-    let zigbee_mac_queue_flush_input_port_id = whitening
+    let lora_queue_flush_input_port_id = whitening
         .message_input_name_to_id("flush_queue")
         .expect("No flush_queue port found!");
     let (zigbee_rxed_sender, mut zigbee_rxed_frames) = mpsc::channel::<Pmt>(100);
@@ -605,10 +627,16 @@ fn main() -> Result<()> {
 
     connect!(
         fg,
-        whitening > header > add_crc > hamming_enc > interleaver > gray_demap
-        >
+        whitening [Circular::with_size(LORA_MAX_FRAME_SIZE)] header [Circular::with_size(LORA_MAX_FRAME_SIZE)]  add_crc [Circular::with_size(LORA_MAX_FRAME_SIZE)]  hamming_enc [Circular::with_size(LORA_MAX_FRAME_SIZE)] interleaver [Circular::with_size(LORA_MAX_FRAME_SIZE)] gray_demap
+        [Circular::with_size(LORA_MAX_FRAME_SIZE)]
         // modulate [Circular::with_size(LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST.max(LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME))] sink_selector.in1
-        modulate [Circular::with_size(LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST.max(LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME))] sink_selector.in1
+        modulate [Circular::with_size(LARGE_ENOUGH_BUFFER_SIZE_FOR_AARONIA_BURST.max(LARGE_ENOUGH_BUFFER_SIZE_FOR_LORA_FRAME))] sink_selector.in1;
+        whitening.flush_propagate | header.flush_queue;
+        header.flush_propagate | add_crc.flush_queue;
+        add_crc.flush_propagate | hamming_enc.flush_queue;
+        hamming_enc.flush_propagate | interleaver.flush_queue;
+        interleaver.flush_propagate | gray_demap.flush_queue;
+        gray_demap.flush_propagate | modulate.flush_queue;
     );
 
     // ========================================
@@ -698,7 +726,12 @@ fn main() -> Result<()> {
     // FLOW PRIORITY TO IP DSCP MAPPER
     // ========================================
 
-    let ip_dscp_rewriter = IPDSCPRewriter::new(flow_priority_map);
+    // let ip_dscp_rewriter = IPDSCPRewriter::new(flow_priority_map);
+    let ip_dscp_rewriter = if args.local_ip == "192.168.42.11" {
+        IPDSCPRewriter::new(flow_priority_map, Some("172.18.0.13:1337"), (49.872653, 8.635148, 181.0))
+    } else {
+        IPDSCPRewriter::new(flow_priority_map, None, (0., 0., 0.))
+    };
     let fg_tx_port = ip_dscp_rewriter
         .message_input_name_to_id("in")
         .expect("No message_in port found!");
@@ -881,11 +914,25 @@ fn main() -> Result<()> {
             match socket.recv_from(&mut buf).await {
                 Ok((n, s)) => {
                     let the_string = std::str::from_utf8(&buf[0..n]).expect("not UTF-8");
-                    let new_protocol_index = the_string.trim_end().parse::<u32>().unwrap();
-                    println!("received protocol number {} from {:?}", new_protocol_index, s);
+                    // println!("received JSON: {}", the_string);
+                    let p: PhyUpdate = serde_json::from_str(the_string).expect("received invalid Phy update: {the_string}");
+                    println!("received protocol number {} from {:?}", p.phy, s);
+                    center_freq[p.phy] = p.center_freq;
+                    println!("setting center_freq to {}", p.center_freq);
+                    tx_freq_offset[p.phy] = p.freq_offset_sink;
+                    println!("setting tx_freq_offset to {}", p.freq_offset_sink);
+                    rx_freq_offset[p.phy] = p.freq_offset_source;
+                    println!("setting rx_freq_offset to {}", p.freq_offset_source);
+                    sample_rate[p.phy] = p.sample_rate;
+                    println!("setting sample_rate to {}", p.sample_rate);
+                    tx_gain[p.phy] = p.gain_tx;
+                    println!("setting tx_gain to {}", p.gain_tx);
+                    rx_gain[p.phy] = p.gain_rx;
+                    println!("setting rx_gain to {}", p.gain_rx);
 
-                    if (new_protocol_index as usize) < NUM_PROTOCOLS {
-                        let new_mtu = MTU_VALUES[new_protocol_index as usize];
+                    if p.phy < NUM_PROTOCOLS {
+                        let new_mtu = MTU_VALUES[p.phy];
+                        println!("setting MTU to {new_mtu}");
                         if new_mtu < current_mtu {
                             // switch to smaller MTU before changing the PHY to avoid dropping packets
                             if let Err(e) = Command::new("sh").arg("-c").arg(format!("ifconfig chanem mtu {} up", new_mtu)).output().await {
@@ -893,53 +940,54 @@ fn main() -> Result<()> {
                             };
                             current_mtu = new_mtu;
                         }
-                        let new_index = new_protocol_index as u32;
+                        let new_index = p.phy as u32;
                         println!("Setting source index to {}", new_index);
-                        if let (Some(tx_frequency_from_channel), Some(rx_frequency_from_channel)) = (tx_freq[new_index as usize], rx_freq[new_index as usize]) {
+                        // set center freq
+                        block_on(
+                            input_handle
+                                .call(
+                                    src,
+                                    src_freq_input_port_id,
+                                    Pmt::VecPmt(vec![Pmt::F64(center_freq[p.phy]), Pmt::U32(args.soapy_rx_channel as u32)])
+                                )
+                        ).unwrap();
+                        block_on(
+                            input_handle
+                                .call(
+                                    sink,
+                                    sink_freq_input_port_id,
+                                    Pmt::VecPmt(vec![Pmt::F64(center_freq[p.phy]), Pmt::U32(args.soapy_tx_channel as u32)])
+                                )
+                        ).unwrap();
+                        // set freq offset
+                        block_on(
+                            input_handle
+                                .call(
+                                    src,
+                                    src_freq_offset_input_port_id,
+                                    Pmt::VecPmt(vec![Pmt::F64(rx_freq_offset[new_index as usize]), Pmt::U32(args.soapy_rx_channel as u32)])
+                                )
+                        ).unwrap();
+                        block_on(
+                            input_handle
+                                .call(
+                                    sink,
+                                    sink_freq_offset_input_port_id,
+                                    Pmt::VecPmt(vec![Pmt::F64(tx_freq_offset[new_index as usize]), Pmt::U32(args.soapy_tx_channel as u32)])
+                                )
+                        ).unwrap();
+                        // update effective center freq in lora frame detector
+                        if p.phy == PROTOCOL_INDEX_ZIGBEE {
                             block_on(
                                 input_handle
                                     .call(
-                                        src,
-                                        src_freq_input_port_id,
-                                        Pmt::VecPmt(vec![Pmt::F64(rx_frequency_from_channel), Pmt::U32(args.soapy_rx_channel as u32)])
+                                        frame_sync,
+                                        frame_sync_center_freq_port,
+                                        Pmt::Usize((center_freq[PROTOCOL_INDEX_ZIGBEE] - rx_freq_offset[PROTOCOL_INDEX_ZIGBEE]) as usize),
                                     )
                             ).unwrap();
-                            block_on(
-                                input_handle
-                                    .call(
-                                        sink,
-                                        sink_freq_input_port_id,
-                                        Pmt::VecPmt(vec![Pmt::F64(tx_frequency_from_channel), Pmt::U32(args.soapy_tx_channel as u32)])
-                                    )
-                            ).unwrap();
-                        } else {
-                            block_on(
-                                input_handle
-                                    .call(
-                                        src,
-                                        src_freq_offset_input_port_id,
-                                        Pmt::VecPmt(vec![Pmt::F64(rx_freq_offset[new_index as usize]), Pmt::U32(args.soapy_rx_channel as u32)])
-                                    )
-                            ).unwrap();
-                            block_on(
-                                input_handle
-                                    .call(
-                                        sink,
-                                        sink_freq_offset_input_port_id,
-                                        Pmt::VecPmt(vec![Pmt::F64(tx_freq_offset[new_index as usize]), Pmt::U32(args.soapy_tx_channel as u32)])
-                                    )
-                            ).unwrap();
-                            if new_protocol_index as usize == PROTOCOL_INDEX_ZIGBEE {
-                                block_on(
-                                    input_handle
-                                        .call(
-                                            frame_sync,
-                                            frame_sync_center_freq_port,
-                                            Pmt::Usize((center_freq[PROTOCOL_INDEX_ZIGBEE] - rx_freq_offset[PROTOCOL_INDEX_ZIGBEE]) as usize),
-                                        )
-                                ).unwrap();
-                            }
                         }
+                        // set sample rate
                         block_on(
                             input_handle
                                 .call(
@@ -951,11 +999,29 @@ fn main() -> Result<()> {
                         block_on(
                             input_handle
                                 .call(
+                                    sink,
+                                    sink_sample_rate_input_port_id,
+                                    Pmt::F64(sample_rate[new_index as usize])
+                                )
+                        ).unwrap();
+                        // set gain
+                        block_on(
+                            input_handle
+                                .call(
                                     src,
                                     src_gain_input_port_id,
                                     Pmt::F64(rx_gain[new_index as usize])
                                 )
                         ).unwrap();
+                        block_on(
+                            input_handle
+                                .call(
+                                    sink,
+                                    sink_gain_input_port_id,
+                                    Pmt::F64(tx_gain[new_index as usize])
+                                )
+                        ).unwrap();
+                        // set flowgraph selector indices
                         block_on(
                             input_handle
                                 .call(
@@ -967,36 +1033,46 @@ fn main() -> Result<()> {
                         block_on(
                             input_handle
                                 .call(
-                                    sink,
-                                    sink_sample_rate_input_port_id,
-                                    Pmt::F64(sample_rate[new_index as usize])
-                                )
-                        ).unwrap();
-                        block_on(
-                            input_handle
-                                .call(
-                                    sink,
-                                    sink_gain_input_port_id,
-                                    Pmt::F64(tx_gain[new_index as usize])
-                                )
-                        ).unwrap();
-                        block_on(
-                            input_handle
-                                .call(
                                     sink_selector,
                                     input_index_port_id,
                                     Pmt::U32(new_index)
                                 )
                         ).unwrap();
-                        if new_protocol_index as usize == PROTOCOL_INDEX_ZIGBEE {
+                        block_on(
+                            input_handle
+                                .call(
+                                    message_selector,
+                                    output_selector_port_id,
+                                    Pmt::U32(new_index)
+                                )
+                        ).unwrap();
+                        // flush queues
+                        block_on(
+                            input_handle
+                                .call(
+                                    sink_selector,
+                                    sink_selector_queue_flush_input_port_id,
+                                    Pmt::Null
+                                )
+                        ).unwrap();
+                        block_on(
+                            input_handle
+                                .call(
+                                    sink,
+                                    sink_queue_flush_input_port_id,
+                                    Pmt::Null
+                                )
+                        ).unwrap();
+                        if p.phy == PROTOCOL_INDEX_ZIGBEE {
                             block_on(
                                 input_handle
                                     .call(
-                                    whitening,
-                                    zigbee_mac_queue_flush_input_port_id,
-                                    Pmt::Null,
+                                        whitening,
+                                        lora_queue_flush_input_port_id,
+                                        Pmt::Null,
                                 )
                             ).unwrap();
+                            // update BW in lora blocks
                             for (block, port) in &bw_changed_handler_lora {
                                 block_on(
                                     input_handle
@@ -1008,7 +1084,7 @@ fn main() -> Result<()> {
                                 ).unwrap();
                             }
                         }
-                        else if new_protocol_index as usize == PROTOCOL_INDEX_WIFI {
+                        else if p.phy == PROTOCOL_INDEX_WIFI {
                             block_on(
                                 input_handle
                                     .call(
@@ -1018,14 +1094,6 @@ fn main() -> Result<()> {
                                 )
                             ).unwrap();
                         }
-                        block_on(
-                            input_handle
-                                .call(
-                                    message_selector,
-                                    output_selector_port_id,
-                                    Pmt::U32(new_index)
-                                )
-                        ).unwrap();
                         if new_mtu > current_mtu {
                             // switch to larger MTU after changing the PHY to avoid dropping packets
                             if let Err(e) = Command::new("sh").arg("-c").arg(format!("ifconfig chanem mtu {} up", new_mtu)).output().await {

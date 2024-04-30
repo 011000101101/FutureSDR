@@ -1,5 +1,5 @@
 use futuresdr::anyhow::Result;
-use futuresdr::macros::async_trait;
+use futuresdr::macros::{async_trait, message_handler};
 use std::cmp::min;
 
 // use futuresdr::futures::FutureExt;
@@ -28,6 +28,7 @@ pub struct Header {
     m_header: [u8; 5],           // contain the header to prepend
     m_tag_payload_len: usize,
     m_tag_payload_str: Vec<u8>,
+    flush: bool,
 }
 
 impl Header {
@@ -38,7 +39,10 @@ impl Header {
                 .add_input::<u8>("in")
                 .add_output::<u8>("out")
                 .build(),
-            MessageIoBuilder::new().build(),
+            MessageIoBuilder::new()
+                .add_input("flush_queue", Self::flush_queue)
+                .add_output("flush_propagate")
+                .build(),
             Header {
                 m_cr: cr,
                 m_has_crc: has_crc,
@@ -49,8 +53,24 @@ impl Header {
                 m_cnt_header_nibbles: 0,
                 m_payload_len: 0, // implicit
                 m_cnt_nibbles: 0,
+                flush: false,
             },
         )
+    }
+
+    #[message_handler]
+    pub fn flush_queue<'a>(
+        &'a mut self,
+        io: &'a mut WorkIo,
+        mio: &'a mut MessageIo<Self>,
+        _meta: &'a mut BlockMeta,
+        _p: Pmt,
+    ) -> Result<Pmt> {
+        self.flush = true;
+        let flush_out_port_id = mio.output_name_to_id("flush_propagate").unwrap();
+        mio.output_mut(flush_out_port_id).post(Pmt::Null).await;
+        io.call_again = true;
+        Ok(Pmt::Null)
     }
 
     // fn set_cr(&mut self, cr: u8) {
@@ -66,12 +86,27 @@ impl Header {
 impl Kernel for Header {
     async fn work(
         &mut self,
-        _io: &mut WorkIo,
+        io: &mut WorkIo,
         sio: &mut StreamIo,
         _m: &mut MessageIo<Self>,
         _b: &mut BlockMeta,
     ) -> Result<()> {
         let input = sio.input(0).slice::<u8>();
+
+        if self.flush {
+            let count = input.len();
+            sio.input(0).consume(count);
+            self.m_header = [0; 5];
+            self.m_tag_payload_len = 0;
+            self.m_tag_payload_str = vec![];
+            self.m_cnt_header_nibbles = 0;
+            self.m_payload_len = 0;
+            self.m_cnt_nibbles = 0;
+            self.flush = false;
+            io.call_again = true;
+            return Ok(());
+        }
+
         let out = sio.output(0).slice::<u8>();
         let mut nitems_to_process = min(input.len(), out.len());
         let mut out_offset: usize = 0;

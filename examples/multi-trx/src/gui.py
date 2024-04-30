@@ -708,8 +708,8 @@ class Ui(QtWidgets.QMainWindow):
         self.radio_button_wifi.setEnabled(False)
         self.radio_button_zigbee.setEnabled(False)
         self.tabWidget.setEnabled(False)
-        self.radio_button_wifi.toggled.connect(partial(self.change_protocol, 0))
-        self.radio_button_zigbee.toggled.connect(partial(self.change_protocol, 1))
+        self.radio_button_wifi.toggled.connect(partial(self.change_protocol, new_index=0))
+        self.radio_button_zigbee.toggled.connect(partial(self.change_protocol, new_index=1))
         self.radio_button_path_loss_freespace.toggled.connect(
             partial(self.select_path_loss_function, new_index=0, invoked_in_gui=True)
         )
@@ -738,7 +738,8 @@ class Ui(QtWidgets.QMainWindow):
     def init_endpoint_controllers(self):
         try:
             self.uav_endpoint_controller = PhyController(
-                url="http://10.193.0.73:1348/api/fg/0/",
+                #                 url="http://10.193.0.73:1348/api/fg/0/",
+                url="10.193.0.73:1346",
                 center_freq=int(2.45e9), rx_freq_offset=(4_000_000, 4_000_000),
                 tx_freq_offset=(4_000_000, 4_000_000),
                 rx_gain=(60, 60), tx_gain=(40, 40),
@@ -747,7 +748,8 @@ class Ui(QtWidgets.QMainWindow):
                 tx_device_channel=0,
             )
             self.ground_endpoint_controller = PhyController(
-                url="http://10.193.0.73:1347/api/fg/0/",
+                #                 url="http://10.193.0.73:1347/api/fg/0/",
+                url="10.193.0.73:1345",
                 center_freq=int(2.45e9), rx_freq_offset=(-4_000_000, -4_000_000),
                 tx_freq_offset=(-4_000_000, -4_000_000),
                 rx_gain=(10, 10), tx_gain=(10, 10),
@@ -758,8 +760,8 @@ class Ui(QtWidgets.QMainWindow):
             self.select_path_loss_function(True, 0, invoked_in_gui=False)
             self.stackedWidget.setCurrentIndex(1)
             self.tabWidget.setEnabled(True)
-#             self.lineEdit_2.setEnabled(True)
-#             self.lineEdit_7.setEnabled(True)
+            #             self.lineEdit_2.setEnabled(True)
+            #             self.lineEdit_7.setEnabled(True)
             self.groupBox_3.setEnabled(True)
             self.radio_button_wifi.setEnabled(True)
             self.radio_button_zigbee.setEnabled(True)
@@ -1127,9 +1129,10 @@ class Ui(QtWidgets.QMainWindow):
                 self.init_endpoint_controllers()
                 self.apply_settings()
 
-    def change_protocol(self, new_index: int):
-        self.uav_endpoint_controller.select_phy(new_index)
-        self.ground_endpoint_controller.select_phy(new_index)
+    def change_protocol(self, checked: bool, new_index: int):
+        if checked:
+            self.uav_endpoint_controller.select_phy(new_index)
+            self.ground_endpoint_controller.select_phy(new_index)
 
     def update_taps(self):
         pass

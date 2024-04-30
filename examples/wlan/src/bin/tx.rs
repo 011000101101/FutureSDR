@@ -120,6 +120,7 @@ fn main() -> Result<()> {
 
     let mut seq = 0u64;
     rt.block_on(async move {
+        let mut i: usize = 0;
         loop {
             Timer::after(Duration::from_secs_f32(args.tx_interval.unwrap_or(0.5))).await;
             println!("sending frame");

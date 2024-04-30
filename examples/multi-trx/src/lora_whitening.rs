@@ -27,7 +27,7 @@ pub struct Whitening {
     quickstart_counter: usize,
 }
 
-const MAX_FRAMES: usize = 128;
+const MAX_FRAMES: usize = 4;
 // const MAX_FRAME_SIZE: usize = 256;
 
 fn get_dscp_priority(data: &Vec<u8>) -> u8 {
@@ -46,6 +46,7 @@ impl Whitening {
             MessageIoBuilder::new()
                 .add_input("tx", Self::msg_handler)
                 .add_input("flush_queue", Self::flush_queue)
+                .add_output("flush_propagate")
                 .build(),
             Whitening {
                 tx_frames: BoundedDiscretePriorityQueue::new(MAX_FRAMES, &PRIORITY_VALUES),
@@ -58,12 +59,14 @@ impl Whitening {
     pub fn flush_queue<'a>(
         &'a mut self,
         _io: &'a mut WorkIo,
-        _mio: &'a mut MessageIo<Self>,
+        mio: &'a mut MessageIo<Self>,
         _meta: &'a mut BlockMeta,
         _p: Pmt,
     ) -> Result<Pmt> {
         self.tx_frames.flush();
         self.quickstart_counter = 0;
+        let flush_out_port_id = mio.output_name_to_id("flush_propagate").unwrap();
+        mio.output_mut(flush_out_port_id).post(Pmt::Null).await;
         Ok(Pmt::Null)
     }
 
@@ -77,14 +80,19 @@ impl Whitening {
     ) -> Result<Pmt> {
         if let Pmt::Blob(data) = p {
             {
+                if data.len() > 255 {
+                    println! {"LoRa: got large frame of {} samples.", data.len()};
+                }
                 let priority = get_dscp_priority(&data);
                 if priority == 0 {
-                    if self.quickstart_counter < 1000 {
-                        self.quickstart_counter += 1;
+                    // if self.quickstart_counter < 1000000 {
+                        // println! {"LoRa: dropping low-priority message."};
+                        // self.quickstart_counter += 1;
                         return Ok(Pmt::Null);
-                    }
+                    // }
                     // TODO fake dropping non-priority for demo to get rid of long "transition time" due to large buffer count
                 }
+                // println! {"LoRa: queueing message (priority {}).", priority};
                 self.tx_frames.push_back(data, priority);
                 io.call_again = true;
             }
