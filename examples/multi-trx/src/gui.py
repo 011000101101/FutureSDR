@@ -83,7 +83,7 @@ RX_PORT_POSITION = 1342
 
 MAX_PATH_LOSS_FOR_PLOTTING = 120
 PLOTTING_INTERVAL_MS = 100
-RATE_SMOOTHING_FACTOR = 1
+RATE_SMOOTHING_FACTOR = 20
 """
 averages rate over the last x intervals for smoother plotting
 """
