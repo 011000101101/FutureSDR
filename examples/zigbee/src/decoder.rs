@@ -129,11 +129,15 @@ impl Kernel for Decoder {
                         if let Some(i) = decode(self.shift_reg, self.threshold) {
                             if let Some(o) = byte {
                                 let len = (i << 4) | *o;
-                                self.state = State::Decode {
-                                    len: len as usize,
-                                    data: Vec::new(),
-                                    byte: None,
-                                };
+                                if len < 128 {
+                                    self.state = State::Decode {
+                                        len: (len as usize).saturating_sub(2),
+                                        data: Vec::new(),
+                                        byte: None,
+                                    };
+                                } else {
+                                    self.state = State::Search;
+                                }
                             } else {
                                 *byte = Some(i);
                             }

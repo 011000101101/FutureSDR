@@ -13,6 +13,7 @@ use std::time::Duration;
 use web_sys::HtmlInputElement;
 
 use prophecy::poll_periodically;
+use prophecy::FlowgraphCanvas;
 use prophecy::FlowgraphHandle;
 use prophecy::FlowgraphMermaid;
 use prophecy::ListSelector;
@@ -28,6 +29,7 @@ use prophecy::Waterfall;
 use prophecy::WaterfallMode;
 
 #[component]
+/// Textual Flowgraph Description
 pub fn Flowgraph(fg_handle: FlowgraphHandle) -> impl IntoView {
     let fg_desc = create_local_resource(|| (), {
         let fg_handle = fg_handle.clone();
@@ -103,6 +105,7 @@ pub fn Flowgraph(fg_handle: FlowgraphHandle) -> impl IntoView {
 // const ENTER_KEY: u32 = 13;
 
 #[component]
+/// Select Flowgraphs of a given Runtime
 pub fn FlowgraphSelector(rt_handle: MaybeSignal<RuntimeHandle>) -> impl IntoView {
     let (fg_handle, fg_handle_set) = create_signal(None);
 
@@ -167,6 +170,7 @@ pub fn FlowgraphSelector(rt_handle: MaybeSignal<RuntimeHandle>) -> impl IntoView
 }
 
 #[component]
+/// Main GUI
 pub fn Prophecy() -> impl IntoView {
     let rt_url = window().location().origin().unwrap();
     let rt_handle = RuntimeHandle::from_url(rt_url);
@@ -297,5 +301,5 @@ pub fn Prophecy() -> impl IntoView {
 pub fn main() {
     _ = console_log::init_with_level(log::Level::Debug);
     console_error_panic_hook::set_once();
-    mount_to_body(|| view! { <Prophecy /> })
+    mount_to_body(|| view! { <FlowgraphCanvas /> })
 }

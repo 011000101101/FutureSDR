@@ -10,18 +10,14 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 futuresdr = { path = "../..", features = ["wgpu"] }
-json = "0.12.4"
 log = { version = "0.4", features = ["release_max_level_off"] }
-rand = "0.8.0"
+rand = "0.8"
+web-time = { version = "1.1" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-console_error_panic_hook = "0.1.6"
-getrandom = { version = "0.2", features = ["js"] }
-instant = { version = "0.1", features = [ "wasm-bindgen" ] }
-wasm-bindgen = "0.2.84"
-wasm-bindgen-futures = "0.4.34"
-web-sys = { version = "0.3.53", features = ["Location"] }
+console_error_panic_hook = "0.1"
+console_log = "1"
+leptos = { version = "0.6", features = ["csr", "nightly"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-clap = { version = "4.0.19", features = ["derive"] }
-instant = { version = "0.1" }
+clap = { version = "4", features = ["derive"] }

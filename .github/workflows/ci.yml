@@ -9,7 +9,7 @@ jobs:
     env:
       RUST_BACKTRACE: full
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@nightly
         with:
@@ -87,6 +87,9 @@ jobs:
       - name: Run cargo fmt (examples/debug)
         run: cargo fmt --all --manifest-path=examples/debug/Cargo.toml -- --check
 
+      - name: Run cargo fmt (examples/egui)
+        run: cargo fmt --all --manifest-path=examples/egui/Cargo.toml -- --check
+
       - name: Run cargo fmt (examples/file-trx)
         run: cargo fmt --all --manifest-path=examples/file-trx/Cargo.toml -- --check
 
@@ -141,7 +144,7 @@ jobs:
     env:
       RUST_BACKTRACE: full
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@nightly
         with:
@@ -186,7 +189,7 @@ jobs:
     env:
       RUST_BACKTRACE: full
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@nightly
         with:
@@ -243,7 +246,7 @@ jobs:
     env:
       RUST_BACKTRACE: full
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@nightly
         with:
@@ -287,6 +290,9 @@ jobs:
 
       - name: Run cargo clippy (examples/debug)
         run: cargo clippy --all-targets --manifest-path=examples/debug/Cargo.toml -- -D warnings
+
+      - name: Run cargo clippy (examples/egui)
+        run: cargo clippy --all-targets --manifest-path=examples/egui/Cargo.toml -- -D warnings
 
       - name: Run cargo clippy (examples/file-trx)
         run: cargo clippy --all-targets --manifest-path=examples/file-trx/Cargo.toml -- -D warnings
@@ -343,7 +349,7 @@ jobs:
       RUST_BACKTRACE: full
       RUSTFLAGS: '--cfg=web_sys_unstable_apis'
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@nightly
         with:
@@ -383,7 +389,7 @@ jobs:
     env:
       RUST_BACKTRACE: full
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - run: sudo apt-get -y update
       - run: sudo apt-get -y install libzmq3-dev
@@ -400,7 +406,7 @@ jobs:
     env:
       RUST_BACKTRACE: full
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - run: cargo test --all-targets --workspace --features=aaronia_http,flow_scheduler,tpb_scheduler,wgpu
 
@@ -410,9 +416,9 @@ jobs:
     env:
       RUST_BACKTRACE: full
     steps:
-      - uses: crazy-max/ghaction-chocolatey@v2
+      - uses: crazy-max/ghaction-chocolatey@v3
         with:
           args: install ninja
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - run: cargo test --all-targets --workspace --features=aaronia_http,flow_scheduler,tpb_scheduler,wgpu

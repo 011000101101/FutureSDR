@@ -1,7 +1,8 @@
 use serde::ser::SerializeTuple;
 use serde::ser::Serializer;
-use wasm_bindgen::{prelude::*, JsCast};
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
+use web_sys::WorkerGlobalScope;
 
 use crate::anyhow::Result;
 use crate::num_complex::Complex32;
@@ -474,9 +475,18 @@ impl Kernel for HackRf {
         _m: &mut MessageIo<Self>,
         _b: &mut BlockMeta,
     ) -> Result<()> {
-        let window = web_sys::window().expect("No global 'window' exists!");
-        let navigator: web_sys::Navigator = window.navigator();
-        let usb = navigator.usb();
+        let usb = {
+            if let Some(window) = web_sys::window() {
+                let navigator: web_sys::Navigator = window.navigator();
+                navigator.usb()
+            } else {
+                let scope: WorkerGlobalScope = js_sys::global()
+                    .dyn_into()
+                    .expect("Neither window nor Worker context exists.");
+                let navigator = scope.navigator();
+                navigator.usb()
+            }
+        };
 
         let filter: serde_json::Value = serde_json::from_str(r#"{ "vendorId": 7504 }"#).unwrap();
         let s = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
@@ -524,7 +534,7 @@ impl Kernel for HackRf {
         self.set_sample_rate(8_000_000, 2).await.unwrap();
         self.set_hw_sync_mode(0).await.unwrap();
         self.set_freq(2_480_000_000).await.unwrap();
-        self.set_vga_gain(20).await.unwrap();
+        self.set_vga_gain(4).await.unwrap();
         self.set_lna_gain(24).await.unwrap();
         self.set_amp_enable(true).await.unwrap();
         self.set_transceiver_mode(TransceiverMode::Receive)

@@ -30,7 +30,7 @@
 //! | [NullSource] | Generates a stream of zeros. | ✅ |
 //! | [Selector] | Forward the input stream with a given index to the output stream with a given index. | ✅ |
 //! | [TagDebug] | Drop samples, printing tags. | ✅ |
-//! | [Throttle] | Limit sample rate. | ❌ |
+//! | [Throttle] | Limit sample rate. | ✅ |
 //! | [VectorSink] | Store received samples in vector. | ✅ |
 //! | [VectorSource] | Stream samples from vector. | ✅ |
 //!
@@ -56,10 +56,12 @@
 //! |---|---|---|
 //! | [BlobToUdp] | Push [Blobs](crate::runtime::Pmt::Blob) into a UDP socket. | ❌ |
 //! | [ChannelSource] | Push samples through a channel into a stream connection. | ✅ |
+//! | [ChannelSink] | Read samples from Flowgraph and send them into a channel | ✅ |
 //! | [FileSink] | Write samples to a file. | ❌ |
 //! | [FileSource] | Read samples from a file. | ❌ |
 //! | [TcpSource] | Reads samples from a TCP socket. | ❌ |
 //! | [TcpSink] | Push samples into a TCP socket. | ❌ |
+//! | [UdpSource] | Reads samples from a UDP socket. | ❌ |
 //! | [WebsocketSink] | Push samples in a WebSocket. | ❌ |
 //! | [WebsocketPmtSink] | Push samples from Pmts a WebSocket. | ❌ |
 //! | [zeromq::PubSink] | Push samples into [ZeroMQ](https://zeromq.org/) socket. | ❌ |
@@ -120,6 +122,12 @@ pub mod audio;
 mod blob_to_udp;
 #[cfg(not(target_arch = "wasm32"))]
 pub use blob_to_udp::BlobToUdp;
+
+mod channel_source;
+pub use channel_source::ChannelSource;
+
+mod channel_sink;
+pub use channel_sink::ChannelSink;
 
 mod combine;
 pub use combine::Combine;
@@ -219,13 +227,13 @@ mod tcp_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub use tcp_source::TcpSource;
 
-#[cfg(not(target_arch = "wasm32"))]
 mod throttle;
-#[cfg(not(target_arch = "wasm32"))]
 pub use throttle::Throttle;
 
-mod channel_source;
-pub use channel_source::ChannelSource;
+#[cfg(not(target_arch = "wasm32"))]
+mod udp_source;
+#[cfg(not(target_arch = "wasm32"))]
+pub use udp_source::UdpSource;
 
 mod vector_sink;
 pub use vector_sink::{VectorSink, VectorSinkBuilder};

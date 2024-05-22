@@ -12,24 +12,26 @@ use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
 use crate::runtime::WorkIo;
 
-/// Push samples into a TCP socket.
-pub struct TcpSource {
-    port: u32,
+/// Read samples from a TCP socket.
+pub struct TcpSource<T: Send + 'static> {
+    bind: String,
     listener: Option<TcpListener>,
     socket: Option<TcpStream>,
+    _type: std::marker::PhantomData<T>,
 }
 
-impl TcpSource {
+impl<T: Send + 'static> TcpSource<T> {
     /// Create TCP Source block
-    pub fn new(port: u32) -> Block {
+    pub fn new(bind: impl Into<String>) -> Block {
         Block::new(
             BlockMetaBuilder::new("TcpSource").build(),
-            StreamIoBuilder::new().add_output::<u8>("out").build(),
+            StreamIoBuilder::new().add_output::<T>("out").build(),
             MessageIoBuilder::new().build(),
             TcpSource {
-                port,
+                bind: bind.into(),
                 listener: None,
                 socket: None,
+                _type: std::marker::PhantomData::<T>,
             },
         )
     }
@@ -37,7 +39,7 @@ impl TcpSource {
 
 #[doc(hidden)]
 #[async_trait]
-impl Kernel for TcpSource {
+impl<T: Send + 'static> Kernel for TcpSource<T> {
     async fn work(
         &mut self,
         io: &mut WorkIo,
@@ -56,7 +58,7 @@ impl Kernel for TcpSource {
             debug!("tcp source accepted connection");
         }
 
-        let out = sio.output(0).slice::<u8>();
+        let out = sio.output(0).slice_unchecked::<u8>();
         if out.is_empty() {
             return Ok(());
         }
@@ -70,7 +72,7 @@ impl Kernel for TcpSource {
         {
             Ok(_) => {
                 debug!("tcp source read bytes {}", out.len());
-                sio.output(0).produce(out.len());
+                sio.output(0).produce(out.len() / std::mem::size_of::<T>());
             }
             Err(_) => {
                 debug!("tcp source socket closed");
@@ -87,7 +89,7 @@ impl Kernel for TcpSource {
         _mio: &mut MessageIo<Self>,
         _meta: &mut BlockMeta,
     ) -> Result<()> {
-        self.listener = Some(TcpListener::bind(format!("127.0.0.1:{}", self.port)).await?);
+        self.listener = Some(TcpListener::bind(self.bind.clone()).await?);
         Ok(())
     }
 }

@@ -1,7 +1,6 @@
 #![warn(missing_docs)]
 #![recursion_limit = "512"]
 #![allow(clippy::new_ret_no_self)]
-#![cfg_attr(not(RUSTC_IS_STABLE), feature(core_intrinsics))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! An experimental asynchronous SDR runtime for heterogeneous architectures that is:
@@ -48,11 +47,6 @@ pub use async_net;
 pub use futuredsp;
 pub use futures;
 pub use futures_lite;
-/// Users should ignore these re-exports
-#[doc(hidden)]
-pub mod ignore {
-    pub use async_trait;
-}
 /// Logging macro
 #[macro_use]
 pub extern crate log;
@@ -61,6 +55,8 @@ extern crate futuresdr_macros;
 
 /// Macros
 pub mod macros {
+    #[doc(hidden)]
+    pub use async_trait::async_trait as async_trait_orig;
     pub use futuresdr_macros::async_trait_external as async_trait;
     pub use futuresdr_macros::connect;
     pub use futuresdr_macros::message_handler_external as message_handler;

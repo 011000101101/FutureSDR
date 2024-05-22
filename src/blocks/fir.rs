@@ -12,7 +12,6 @@ use crate::runtime::WorkIo;
 use futuredsp::fir::*;
 use futuredsp::firdes;
 use futuredsp::{TapsAccessor, UnaryKernel};
-use num_integer;
 
 /// FIR filter.
 pub struct Fir<InputType, OutputType, TapAccessor, TapType, Core>

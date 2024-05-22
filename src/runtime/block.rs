@@ -1,8 +1,9 @@
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::join_all;
 use futures::future::Either;
-use futures::prelude::*;
 use futures::FutureExt;
+use futures::SinkExt;
+use futures::StreamExt;
 use std::any::Any;
 use std::fmt;
 use std::future::Future;
@@ -33,12 +34,22 @@ pub struct WorkIo {
     /// Block on future
     ///
     /// The block will be called (1) if somehting happens or (2) if the future resolves
+    #[cfg(not(target_arch = "wasm32"))]
     pub block_on: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
+    /// The block will be called (1) if somehting happens or (2) if the future resolves
+    #[cfg(target_arch = "wasm32")]
+    pub block_on: Option<Pin<Box<dyn Future<Output = ()>>>>,
 }
 
 impl WorkIo {
     /// Helper to set the future of the Work IO
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn block_on<F: Future<Output = ()> + Send + 'static>(&mut self, f: F) {
+        self.block_on = Some(Box::pin(f));
+    }
+    /// Helper to set the future of the Work IO
+    #[cfg(target_arch = "wasm32")]
+    pub fn block_on<F: Future<Output = ()> + 'static>(&mut self, f: F) {
         self.block_on = Some(Box::pin(f));
     }
 }
@@ -427,7 +438,7 @@ impl<T: Kernel + Send + 'static> TypedBlockWrapper<T> {
                 if let Some(f) = work_io.block_on.take() {
                     let p = inbox.as_mut().peek();
 
-                    match future::select(f, p).await {
+                    match futures::future::select(f, p).await {
                         Either::Left(_) => {
                             work_io.call_again = true;
                         }
