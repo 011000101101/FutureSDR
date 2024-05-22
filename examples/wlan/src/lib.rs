@@ -45,6 +45,9 @@ pub use sync_short::SyncShort;
 mod viterbi_decoder;
 pub use viterbi_decoder::ViterbiDecoder;
 
+mod demo_block_estimate_dc_offset;
+pub use demo_block_estimate_dc_offset::DemoBlockEstimateDCOffset;
+
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 

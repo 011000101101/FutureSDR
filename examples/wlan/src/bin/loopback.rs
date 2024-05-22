@@ -18,7 +18,7 @@ use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
 
-use wlan::fft_tag_propagation;
+use wlan::{DemoBlockEstimateDCOffset, fft_tag_propagation};
 use wlan::Decoder;
 use wlan::Encoder;
 use wlan::FrameEqualizer;
@@ -74,6 +74,15 @@ fn main() -> Result<()> {
         Circular::with_size(prefix_in_size),
     )?;
 
+    let demo_block = fg.add_block(DemoBlockEstimateDCOffset::new());
+    fg.connect_stream_with_type(
+        prefix,
+        "out",
+        demo_block,
+        "in",
+        Circular::with_size(prefix_out_size),
+    )?;
+
     // add noise
     let normal = Normal::new(0.0f32, 0.01).unwrap();
     let noise = fg.add_block(Apply::new(move |i: &Complex32| -> Complex32 {
@@ -82,7 +91,7 @@ fn main() -> Result<()> {
         i + Complex32::new(re, imag)
     }));
     fg.connect_stream_with_type(
-        prefix,
+        demo_block,
         "out",
         noise,
         "in",
