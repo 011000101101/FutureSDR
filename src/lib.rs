@@ -35,8 +35,11 @@
 //! }
 //! ```
 
-pub mod blocks;
-pub mod runtime;
+#[macro_use]
+extern crate futuresdr_macros;
+/// Logging macro
+#[macro_use]
+pub extern crate tracing;
 
 // re-exports
 pub use anyhow;
@@ -44,25 +47,24 @@ pub use anyhow;
 pub use async_io;
 #[cfg(not(target_arch = "wasm32"))]
 pub use async_net;
-pub use futuredsp;
 pub use futures;
 pub use futures_lite;
-/// Logging macro
-#[macro_use]
-pub extern crate tracing;
-#[macro_use]
-extern crate futuresdr_macros;
+pub use num_complex;
+pub use num_integer;
+#[cfg(feature = "seify")]
+pub use seify;
+
+pub use futuredsp;
+
+pub mod blocks;
+pub mod runtime;
 
 /// Macros
 pub mod macros {
     #[doc(hidden)]
     pub use async_trait::async_trait as async_trait_orig;
+
     pub use futuresdr_macros::async_trait_external as async_trait;
     pub use futuresdr_macros::connect;
     pub use futuresdr_macros::message_handler_external as message_handler;
 }
-
-pub use num_complex;
-pub use num_integer;
-#[cfg(feature = "seify")]
-pub use seify;
