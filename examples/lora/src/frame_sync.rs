@@ -110,10 +110,10 @@ pub struct FrameSync {
     m_samples_per_symbol: usize, //< Number of samples received per lora symbols
     m_symb_numb: usize,          //<number of payload lora symbols
     m_received_head: bool, //< indicate that the header has be decoded and received by this block
-    // m_noise_est: f64,            //< estimate of the noise
-    in_down: Vec<Complex32>,     //< downsampled input
+    snr_est: f64,          //< estimate of the snr
+    in_down: Vec<Complex32>, //< downsampled input
     m_downchirp: Vec<Complex32>, //< Reference downchirp
-    m_upchirp: Vec<Complex32>,   //< Reference upchirp
+    m_upchirp: Vec<Complex32>, //< Reference upchirp
 
     frame_cnt: usize,       //< Number of frame received
     symbol_cnt: SyncState,  //< Number of symbols already received
@@ -139,7 +139,7 @@ pub struct FrameSync {
 
     m_cfo_frac: f64, //< fractional part of CFO
     // m_cfo_frac_bernier: f32, //< fractional part of CFO using Berniers algo
-    // m_cfo_int: i32,                               //< integer part of CFO
+    m_cfo_int: isize,                //< integer part of CFO
     m_sto_frac: f32,                 //< fractional part of CFO
     sfo_hat: f32,                    //< estimated sampling frequency offset
     sfo_cum: f32,                    //< cumulation of the sfo
@@ -229,6 +229,7 @@ impl FrameSync {
                 m_n_up_req: From::<usize>::from(preamble_len_tmp - 3), //< number of consecutive upchirps required to trigger a detection
                 up_symb_to_use: preamble_len_tmp - 4, //< number of upchirp symbols to use for CFO and STO frac estimation
 
+                m_cfo_int: 0,    //< integer part of CFO
                 m_sto_frac: 0.0, //< fractional part of CFO
 
                 m_impl_head: impl_head, //< use implicit header mode
@@ -273,7 +274,7 @@ impl FrameSync {
                 // m_ldro: bool,                        //< use of low datarate optimisation mode  // local to frame info handler
                 m_symb_numb: 0,         //<number of payload lora symbols
                 m_received_head: false, //< indicate that the header has be decoded and received by this block
-                // m_noise_est: f64,            //< estimate of the noise  // local to noise est handler
+                snr_est: 0.0,           //< estimate of the snr
 
                 // bin_idx_new: i32, //< value of newly demodulated symbol  // local to work
                 additional_upchirps: 0, //< indicate the number of additional upchirps found in preamble (in addition to the minimum required to trigger a detection)
@@ -561,7 +562,7 @@ impl FrameSync {
     //     return energy_chirp / self.m_number_of_bins as f32 / length_tmp as f32;
     // }
 
-    fn determine_snr(&self, samples: &[Complex32]) -> f32 {
+    fn determine_snr(&self, samples: &[Complex32]) -> f64 {
         // Multiply with ideal downchirp
         let mut dechirped = volk_32fc_x2_multiply_32fc(samples, &self.m_downchirp);
         // do the FFT
@@ -570,16 +571,16 @@ impl FrameSync {
         let fft_mag: Vec<f32> = dechirped.iter().map(|c| c.norm_sqr()).collect();
         let tot_en: f32 = fft_mag.iter().sum();
         if tot_en == 0. {
-            return f32::NAN;
+            return f64::NAN;
         }
         // Return argmax here
         let max_idx = argmax_f32(&fft_mag);
         let sig_en = fft_mag[max_idx];
         let noise_en = tot_en - sig_en;
         if noise_en == 0. {
-            return f32::INFINITY;
+            return f64::INFINITY;
         }
-        10.0 * (sig_en / noise_en).log10()
+        10.0 * (sig_en as f64 / noise_en as f64).log10()
     }
 
     fn cache_current_net_id(&mut self) {
@@ -838,7 +839,7 @@ impl FrameSync {
         // requires self.m_samples_per_symbol samples in input buffer, but QuarterDown also needs 'backward' access to up to 3 samples for net-id re-synching when CFO is at minimum
         self.additional_symbol_samp[self.m_samples_per_symbol..(self.m_samples_per_symbol + count)]
             .copy_from_slice(&input[offset..(offset + count)]);
-        let m_cfo_int = if let Some(down_val) = self.down_val {
+        self.m_cfo_int = if let Some(down_val) = self.down_val {
             // info!("down_val: {}", down_val);
             // tuning CFO entails re-tuning STO (to not lose alignment of preamble upchirps) -> slope is normalized to 1 -> move half distance in frequency -> entails moving half distance in time -> aligns downchirp with sampling window, while keeping alignment of upchirps
             // if CFO_int is 0, this check is perfectly aligned with the second downchirp.
@@ -855,7 +856,7 @@ impl FrameSync {
             panic!("self.down_val must not be None here.")
         };
 
-        let cfo_int_modulo = my_modulo(m_cfo_int, self.m_number_of_bins);
+        let cfo_int_modulo = my_modulo(self.m_cfo_int, self.m_number_of_bins);
 
         // *******
         // re-estimate sto_frac and estimate SFO
@@ -870,7 +871,7 @@ impl FrameSync {
             .map(|x| {
                 Complex32::from_polar(
                     1.,
-                    -2. * PI * m_cfo_int as f32 / self.m_number_of_bins as f32 * x as f32,
+                    -2. * PI * self.m_cfo_int as f32 / self.m_number_of_bins as f32 * x as f32,
                 )
             })
             .collect();
@@ -881,7 +882,7 @@ impl FrameSync {
                                                                                   // small, as m_cfo_int+self.m_cfo_frac bounded by ]-(self.m_number_of_bins/4+0.5),+(self.m_number_of_bins/4+0.5)[
                                                                                   // BW/s_f = 1/6400 @ 125kHz, 800mHz
                                                                                   // -> sfo_hat ~ ]-1/250,+1/250[
-        self.sfo_hat = (m_cfo_int as f32 + self.m_cfo_frac as f32) * self.m_bw as f32
+        self.sfo_hat = (self.m_cfo_int as f32 + self.m_cfo_frac as f32) * self.m_bw as f32
             / self.m_center_freq as f32;
         // CFO normalized to carrier frequency / SFO times t_samp
         let clk_off = self.sfo_hat as f64 / self.m_number_of_bins as f64;
@@ -949,13 +950,13 @@ impl FrameSync {
         // apply sfo correction
         corr_preamb = volk_32fc_x2_multiply_32fc(&corr_preamb, &sfo_corr_vect);
 
-        let mut snr_est = 0.0_f32;
+        self.snr_est = 0.0_f64;
         for i in 0..self.up_symb_to_use {
-            snr_est += self.determine_snr(
+            self.snr_est += self.determine_snr(
                 &corr_preamb[(i * self.m_number_of_bins)..((i + 1) * self.m_number_of_bins)],
             );
         }
-        snr_est /= self.up_symb_to_use as f32;
+        self.snr_est /= self.up_symb_to_use as f64;
 
         // update sto_frac to its value at the beginning of the net id
         self.m_sto_frac += self.sfo_hat * self.m_preamb_len as f32;
@@ -976,7 +977,7 @@ impl FrameSync {
         // start_off gives the offset in the net_id_samp vector required to be aligned in time (CFOint is equivalent to STOint at this point, since upchirp_val was forced to 0, and initial alignment has already been performed. note that CFOint here is only the remainder of STOint that needs to be re-aligned.)
         let start_off = (self.compute_sto_index() as isize
             // self.m_number_of_bins as isize / 4 is manually introduced static NET_ID_1 start offset in array before CFO alignment to be able to align negative m_cfo_int offsets
-            + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + m_cfo_int))
+            + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + self.m_cfo_int))
             as usize;
         let count = 2 * self.m_number_of_bins;
         let mut net_ids_samp_dec: Vec<Complex32> = self.net_id_samp
@@ -1110,7 +1111,8 @@ impl FrameSync {
                 // the first symbol was mistaken for the end of the downchirp. we should correct and output it.
                 let start_off = self.m_os_factor as isize / 2  // start half a sample delayed to have a buffer for the following STOfrac (of value +-1/2 sample) ->
                     - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
-                    + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + m_cfo_int);
+                    + self.m_os_factor as isize
+                        * (self.m_number_of_bins as isize / 4 + self.m_cfo_int);
                 for i in (start_off..(self.m_samples_per_symbol as isize * 5 / 4))
                     .step_by(self.m_os_factor)
                 {
@@ -1140,13 +1142,13 @@ impl FrameSync {
                 );
             }
         }
-        info!("SNR: {}dB", snr_est);
+        info!("SNR: {}dB", self.snr_est);
         info!("Net-ID: [{}, {}]", self.net_id[0], self.net_id[1]);
         // net IDs syntactically correct and matching offset => frame detected, proceed with trying to decode the header
         self.m_received_head = false;
         // consume the quarter downchirp, and at the same time correct CFOint (already applied correction for NET_ID recovery was only in retrospect on a local buffer)
         items_to_consume +=
-            self.m_samples_per_symbol as isize / 4 + self.m_os_factor as isize * m_cfo_int;
+            self.m_samples_per_symbol as isize / 4 + self.m_os_factor as isize * self.m_cfo_int;
         assert!(
             items_to_consume <= nitems_to_process as isize,
             "must not happen, we already altered persistent state."
@@ -1175,7 +1177,7 @@ impl FrameSync {
         let mut frame_info: HashMap<String, Pmt> = HashMap::new();
 
         frame_info.insert(String::from("is_header"), Pmt::Bool(true));
-        frame_info.insert(String::from("cfo_int"), Pmt::F32(m_cfo_int as f32));
+        frame_info.insert(String::from("cfo_int"), Pmt::Isize(self.m_cfo_int));
         frame_info.insert(String::from("cfo_frac"), Pmt::F64(self.m_cfo_frac));
         frame_info.insert(String::from("sf"), Pmt::Usize(self.m_sf));
         let frame_info_pmt = Pmt::MapStrPmt(frame_info);
@@ -1350,6 +1352,9 @@ impl FrameSync {
                     Pmt::Bool(self.receive_statistics_one_symbol_off),
                 );
             }
+            frame_info.insert(String::from("cfo_int"), Pmt::Isize(self.m_cfo_int));
+            frame_info.insert(String::from("cfo_frac"), Pmt::F64(self.m_cfo_frac));
+            frame_info.insert(String::from("snr"), Pmt::F64(self.snr_est));
             sio.output(0).add_tag(
                 0,
                 Tag::NamedAny(

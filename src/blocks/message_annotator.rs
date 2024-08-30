@@ -14,7 +14,7 @@ use crate::runtime::WorkIo;
 /// Forward messages.
 pub struct MessageAnnotator {
     annotation_prototype: HashMap<String, Pmt>,
-    payload_field_name: String,
+    payload_field_name: Option<String>,
 }
 
 impl MessageAnnotator {
@@ -29,7 +29,7 @@ impl MessageAnnotator {
                 .build(),
             MessageAnnotator {
                 annotation_prototype: annotation,
-                payload_field_name: payload_field_name.unwrap_or("payload").to_owned(),
+                payload_field_name: payload_field_name.map(String::from),
             },
         )
     }
@@ -42,14 +42,27 @@ impl MessageAnnotator {
         _meta: &mut BlockMeta,
         p: Pmt,
     ) -> Result<Pmt> {
-        match p {
-            Pmt::Finished => {
-                io.finished = true;
+        if let Some(payload_field_name) = self.payload_field_name.clone() {
+            match p {
+                Pmt::Finished => {
+                    io.finished = true;
+                }
+                p => {
+                    let mut annotated_message = self.annotation_prototype.clone();
+                    annotated_message.insert(payload_field_name, p);
+                    mio.post(0, Pmt::MapStrPmt(annotated_message)).await;
+                }
             }
-            p => {
-                let mut annotated_message = self.annotation_prototype.clone();
-                annotated_message.insert(self.payload_field_name.clone(), p);
-                mio.post(0, Pmt::MapStrPmt(annotated_message)).await;
+        } else {
+            match p {
+                Pmt::Finished => {
+                    io.finished = true;
+                }
+                Pmt::MapStrPmt(mut annotated_message) => {
+                    annotated_message.extend(self.annotation_prototype.clone());
+                    mio.post(0, Pmt::MapStrPmt(annotated_message)).await;
+                }
+                _ => return Ok(Pmt::InvalidValue),
             }
         }
         Ok(Pmt::Ok)

@@ -197,13 +197,12 @@ fn main() -> Result<()> {
             );
             if args.forward_addr.is_some() {
                 let tags: HashMap<String, Pmt> = HashMap::from([
-                    (String::from("codr"), Pmt::U32(1)), // TODO tag received packet to get actual value
                     (String::from("sf"), Pmt::U32(sf as u32)),
                     (String::from("bw"), Pmt::U32((BANDWIDTH / 1000) as u32)),
                     (String::from("freq"), Pmt::F64(center_freq as f64)),
                 ]);
                 let metadata_tagger = MessageAnnotator::new(tags, None);
-                connect!(fg, decoder.out | metadata_tagger.in);
+                connect!(fg, decoder.out_annotated | metadata_tagger.in);
                 tagged_msg_out_ports.push(metadata_tagger);
             }
         }

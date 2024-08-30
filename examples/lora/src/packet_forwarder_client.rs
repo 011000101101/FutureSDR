@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use semtech_udp::{Bandwidth, CodingRate, DataRate, MacAddress, SpreadingFactor};
 use semtech_udp::client_runtime::{Event, UdpRuntime};
-use semtech_udp::push_data::{CRC, Packet, RxPk, RxPkV2};
+use semtech_udp::push_data::{CRC, Packet, RSig, RxPk, RxPkV2};
 use tokio::runtime::Runtime;
 use triggered::Trigger;
 
@@ -114,8 +114,8 @@ impl PacketForwarderClient {
             }
             Pmt::MapStrPmt(m) => {
                 if let Pmt::Blob(payload) = m.get("payload").unwrap() {
-                    let codr: CodingRate = match m.get("codr").unwrap() {
-                        Pmt::U32(1) => CodingRate::_4_5,
+                    let codr: CodingRate = match m.get("code_rate").unwrap() {
+                        Pmt::Usize(1) => CodingRate::_4_5,
                         Pmt::U32(2) => CodingRate::_4_6,
                         Pmt::U32(3) => CodingRate::_4_7,
                         Pmt::U32(4) => CodingRate::_4_8,
@@ -143,7 +143,34 @@ impl PacketForwarderClient {
                     };
                     let freq: f64 = match m.get("freq").unwrap() {
                         Pmt::F64(f) => *f,
-                        _ => panic!("invalid Frequency in received msg: {:?}", m.get("bw")),
+                        _ => panic!("invalid Frequency in received msg: {:?}", m.get("freq")),
+                    };
+                    let stat = match m.get("has_crc").unwrap() {
+                        Pmt::Bool(true) => CRC::OK,
+                        Pmt::Bool(false) => CRC::Disabled,
+                        _ => panic!("invalid has_crc in received msg: {:?}", m.get("has_crc")),
+                    };
+                    let mut cfo: f32 = 0.0;
+                    if let Some(Pmt::Isize(cfo_int)) = m.get("cfo_int") {
+                        cfo += *cfo_int as f32 * (bw.to_hz() as f32 / (1 << sf.to_u8()) as f32);
+                    }
+                    if let Some(Pmt::F64(cfo_frac)) = m.get("cfo_frac") {
+                        cfo += *cfo_frac as f32;
+                    }
+                    let received_signal_info = match m.get("snr").unwrap() {
+                        Pmt::F64(snr) => RSig {
+                            ant: 0,
+                            chan: 0,
+                            rssic: 0,
+                            rssis: None,
+                            lsnr: *snr as f32,
+                            etime: None,
+                            foff: Some(cfo as i64),
+                            ftstat: None,
+                            ftver: None,
+                            ftdelta: None,
+                        },
+                        _ => panic!("invalid SNR in received msg: {:?}", m.get("snr")),
                     };
                     let rxpk = RxPk::V2(RxPkV2 {
                         aesk: 0,
@@ -154,15 +181,15 @@ impl PacketForwarderClient {
                         freq,
                         jver: 2,
                         modu: "LORA".to_owned(),
-                        rsig: vec![], // TODO
+                        rsig: vec![received_signal_info],
                         size: payload.len() as u64,
-                        stat: CRC::OK,
+                        stat,
                         tmst: 0, // TODO
                         delayed: None,
                         tmms: None,
                         time: None,
                     });
-                    let packet = semtech_udp::push_data::Packet::from_rxpk(self.mac_addr, rxpk);
+                    let packet = Packet::from_rxpk(self.mac_addr, rxpk);
                     self.uplink_sender.send(packet).await.unwrap();
                 } else {
                     panic!(
