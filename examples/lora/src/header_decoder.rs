@@ -149,18 +149,9 @@ impl Kernel for HeaderDecoder {
                     panic!()
                 };
                 if is_header {
-                    if let Some(Pmt::Bool(one_symbol_off)) = tags[0].1.get("one_symbol_off") {
-                        if let Some(Pmt::Isize(net_id_off)) = tags[0].1.get("net_id_off") {
-                            Some(HashMap::<String, Pmt>::from([
-                                (String::from("one_symbol_off"), Pmt::Bool(*one_symbol_off)),
-                                (String::from("net_id_off"), Pmt::Isize(*net_id_off)),
-                            ]))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
+                    let mut tmp = tags[0].1.clone();
+                    tmp.remove("is_header");
+                    Some(tmp)
                 } else {
                     Some(tags[0].1.clone())
                 }

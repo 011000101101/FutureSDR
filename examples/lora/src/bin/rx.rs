@@ -1,4 +1,5 @@
 use clap::Parser;
+
 use futuresdr::anyhow::{anyhow, Result};
 use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::blocks::BlobToUdp;
@@ -8,7 +9,6 @@ use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
 use futuresdr::tracing::error;
 use futuresdr::tracing::info;
-
 use lora::utilities::Bandwidth;
 use lora::utilities::Channel;
 use lora::utilities::SpreadingFactor;
@@ -76,6 +76,7 @@ fn main() -> Result<()> {
         None,
         Some("header_crc_ok"),
         false,
+        None,
     );
     let fft_demod = FftDemod::new(SOFT_DECODING, args.spreading_factor.into());
     let gray_mapping = GrayMapping::new(SOFT_DECODING);

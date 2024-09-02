@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustfft::{Fft, FftDirection, FftPlanner};
 
@@ -139,7 +140,7 @@ pub struct FrameSync {
 
     m_cfo_frac: f64, //< fractional part of CFO
     // m_cfo_frac_bernier: f32, //< fractional part of CFO using Berniers algo
-    m_cfo_int: isize,                //< integer part of CFO
+    // m_cfo_int: isize,                //< integer part of CFO
     m_sto_frac: f32,                 //< fractional part of CFO
     sfo_hat: f32,                    //< estimated sampling frequency offset
     sfo_cum: f32,                    //< cumulation of the sfo
@@ -162,6 +163,8 @@ pub struct FrameSync {
     receive_statistics_one_symbol_off: bool,
     fft_forward_number_of_bins: Arc<dyn Fft<f32>>,
     fft_forward_two_times_number_of_bins: Arc<dyn Fft<f32>>,
+    startup_timestamp_nanos: u64,
+    processed_samples: u64,
 }
 
 impl FrameSync {
@@ -176,6 +179,7 @@ impl FrameSync {
         preamble_len: Option<usize>,
         net_id_caching_policy: Option<&str>,
         collect_receive_statistics: bool,
+        startup_timestamp: Option<SystemTime>,
     ) -> Block {
         let net_id_caching_policy_tmp = match NetIdCachingPolicy::from_str(net_id_caching_policy.unwrap_or("header_crc_ok")) {
             Ok(tmp) => tmp,
@@ -229,7 +233,7 @@ impl FrameSync {
                 m_n_up_req: From::<usize>::from(preamble_len_tmp - 3), //< number of consecutive upchirps required to trigger a detection
                 up_symb_to_use: preamble_len_tmp - 4, //< number of upchirp symbols to use for CFO and STO frac estimation
 
-                m_cfo_int: 0,    //< integer part of CFO
+                // m_cfo_int: 0,    //< integer part of CFO
                 m_sto_frac: 0.0, //< fractional part of CFO
 
                 m_impl_head: impl_head, //< use implicit header mode
@@ -304,6 +308,12 @@ impl FrameSync {
                 fft_forward_number_of_bins: fft_detect,
                 fft_forward_two_times_number_of_bins: FftPlanner::new()
                     .plan_fft(2 * m_number_of_bins_tmp, FftDirection::Forward),
+                startup_timestamp_nanos: startup_timestamp
+                    .unwrap_or(SystemTime::now())
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as u64,
+                processed_samples: 0,
             },
         )
     }
@@ -839,7 +849,7 @@ impl FrameSync {
         // requires self.m_samples_per_symbol samples in input buffer, but QuarterDown also needs 'backward' access to up to 3 samples for net-id re-synching when CFO is at minimum
         self.additional_symbol_samp[self.m_samples_per_symbol..(self.m_samples_per_symbol + count)]
             .copy_from_slice(&input[offset..(offset + count)]);
-        self.m_cfo_int = if let Some(down_val) = self.down_val {
+        let m_cfo_int = if let Some(down_val) = self.down_val {
             // info!("down_val: {}", down_val);
             // tuning CFO entails re-tuning STO (to not lose alignment of preamble upchirps) -> slope is normalized to 1 -> move half distance in frequency -> entails moving half distance in time -> aligns downchirp with sampling window, while keeping alignment of upchirps
             // if CFO_int is 0, this check is perfectly aligned with the second downchirp.
@@ -856,7 +866,7 @@ impl FrameSync {
             panic!("self.down_val must not be None here.")
         };
 
-        let cfo_int_modulo = my_modulo(self.m_cfo_int, self.m_number_of_bins);
+        let cfo_int_modulo = my_modulo(m_cfo_int, self.m_number_of_bins);
 
         // *******
         // re-estimate sto_frac and estimate SFO
@@ -871,7 +881,7 @@ impl FrameSync {
             .map(|x| {
                 Complex32::from_polar(
                     1.,
-                    -2. * PI * self.m_cfo_int as f32 / self.m_number_of_bins as f32 * x as f32,
+                    -2. * PI * m_cfo_int as f32 / self.m_number_of_bins as f32 * x as f32,
                 )
             })
             .collect();
@@ -882,7 +892,7 @@ impl FrameSync {
                                                                                   // small, as m_cfo_int+self.m_cfo_frac bounded by ]-(self.m_number_of_bins/4+0.5),+(self.m_number_of_bins/4+0.5)[
                                                                                   // BW/s_f = 1/6400 @ 125kHz, 800mHz
                                                                                   // -> sfo_hat ~ ]-1/250,+1/250[
-        self.sfo_hat = (self.m_cfo_int as f32 + self.m_cfo_frac as f32) * self.m_bw as f32
+        self.sfo_hat = (m_cfo_int as f32 + self.m_cfo_frac as f32) * self.m_bw as f32
             / self.m_center_freq as f32;
         // CFO normalized to carrier frequency / SFO times t_samp
         let clk_off = self.sfo_hat as f64 / self.m_number_of_bins as f64;
@@ -977,7 +987,7 @@ impl FrameSync {
         // start_off gives the offset in the net_id_samp vector required to be aligned in time (CFOint is equivalent to STOint at this point, since upchirp_val was forced to 0, and initial alignment has already been performed. note that CFOint here is only the remainder of STOint that needs to be re-aligned.)
         let start_off = (self.compute_sto_index() as isize
             // self.m_number_of_bins as isize / 4 is manually introduced static NET_ID_1 start offset in array before CFO alignment to be able to align negative m_cfo_int offsets
-            + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + self.m_cfo_int))
+            + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + m_cfo_int))
             as usize;
         let count = 2 * self.m_number_of_bins;
         let mut net_ids_samp_dec: Vec<Complex32> = self.net_id_samp
@@ -1111,8 +1121,7 @@ impl FrameSync {
                 // the first symbol was mistaken for the end of the downchirp. we should correct and output it.
                 let start_off = self.m_os_factor as isize / 2  // start half a sample delayed to have a buffer for the following STOfrac (of value +-1/2 sample) ->
                     - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32)
-                    + self.m_os_factor as isize
-                        * (self.m_number_of_bins as isize / 4 + self.m_cfo_int);
+                    + self.m_os_factor as isize * (self.m_number_of_bins as isize / 4 + m_cfo_int);
                 for i in (start_off..(self.m_samples_per_symbol as isize * 5 / 4))
                     .step_by(self.m_os_factor)
                 {
@@ -1148,7 +1157,7 @@ impl FrameSync {
         self.m_received_head = false;
         // consume the quarter downchirp, and at the same time correct CFOint (already applied correction for NET_ID recovery was only in retrospect on a local buffer)
         items_to_consume +=
-            self.m_samples_per_symbol as isize / 4 + self.m_os_factor as isize * self.m_cfo_int;
+            self.m_samples_per_symbol as isize / 4 + self.m_os_factor as isize * m_cfo_int;
         assert!(
             items_to_consume <= nitems_to_process as isize,
             "must not happen, we already altered persistent state."
@@ -1174,12 +1183,33 @@ impl FrameSync {
             - FrameSync::my_roundf(self.m_sto_frac * self.m_os_factor as f32) as f32)
             / self.m_os_factor as f32;
 
+        if self.m_sf < 7 && !LEGACY_SF_5_6
+        //Semtech adds two null symbol in the beginning. Maybe for additional synchronization?
+        {
+            items_to_consume += 2 * self.m_samples_per_symbol as isize;
+        }
+
         let mut frame_info: HashMap<String, Pmt> = HashMap::new();
 
         frame_info.insert(String::from("is_header"), Pmt::Bool(true));
-        frame_info.insert(String::from("cfo_int"), Pmt::Isize(self.m_cfo_int));
+        frame_info.insert(String::from("cfo_int"), Pmt::Isize(m_cfo_int));
         frame_info.insert(String::from("cfo_frac"), Pmt::F64(self.m_cfo_frac));
         frame_info.insert(String::from("sf"), Pmt::Usize(self.m_sf));
+        frame_info.insert(
+            String::from("timestamp"),
+            Pmt::U64(
+                self.startup_timestamp_nanos
+                    + (self.processed_samples
+                        + items_to_consume as u64
+                        + if one_symbol_off {
+                            self.m_samples_per_symbol as u64
+                        } else {
+                            0
+                        })
+                        * 1_000_000_000
+                        / ((self.m_bw * self.m_os_factor) as u64),
+            ),
+        );
         let frame_info_pmt = Pmt::MapStrPmt(frame_info);
 
         debug!(
@@ -1200,11 +1230,6 @@ impl FrameSync {
         } else {
             self.transition_state(DecoderState::SfoCompensation, Some(SyncState::NetId1));
         };
-        if self.m_sf < 7 && !LEGACY_SF_5_6
-        //Semtech adds two null symbol in the beginning. Maybe for additional synchronization?
-        {
-            items_to_consume += 2 * self.m_samples_per_symbol as isize;
-        }
 
         (items_to_consume, items_to_output)
     }
@@ -1352,8 +1377,8 @@ impl FrameSync {
                     Pmt::Bool(self.receive_statistics_one_symbol_off),
                 );
             }
-            frame_info.insert(String::from("cfo_int"), Pmt::Isize(self.m_cfo_int));
-            frame_info.insert(String::from("cfo_frac"), Pmt::F64(self.m_cfo_frac));
+            // frame_info.insert(String::from("cfo_int"), Pmt::Isize(self.m_cfo_int));
+            // frame_info.insert(String::from("cfo_frac"), Pmt::F64(self.m_cfo_frac));
             frame_info.insert(String::from("snr"), Pmt::F64(self.snr_est));
             sio.output(0).add_tag(
                 0,
@@ -1550,6 +1575,7 @@ impl Kernel for FrameSync {
                 but input buffer only holds {nitems_to_process}."
             );
             if items_to_consume > 0 {
+                self.processed_samples += items_to_consume as u64;
                 sio.input(0).consume(items_to_consume as usize);
             }
             if items_to_output > 0 {

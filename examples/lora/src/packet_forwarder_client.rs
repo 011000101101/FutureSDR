@@ -1,9 +1,12 @@
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::time::{Duration, SystemTime};
 
-use semtech_udp::{Bandwidth, CodingRate, DataRate, MacAddress, SpreadingFactor};
+use chrono::prelude::DateTime;
+use chrono::prelude::Utc;
 use semtech_udp::client_runtime::{Event, UdpRuntime};
-use semtech_udp::push_data::{CRC, Packet, RSig, RxPk, RxPkV2};
+use semtech_udp::push_data::{Packet, RSig, RxPk, RxPkV2, CRC};
+use semtech_udp::{Bandwidth, CodingRate, DataRate, MacAddress, SpreadingFactor};
 use tokio::runtime::Runtime;
 use triggered::Trigger;
 
@@ -164,7 +167,7 @@ impl PacketForwarderClient {
                             rssic: 0,
                             rssis: None,
                             lsnr: *snr as f32,
-                            etime: None,
+                            etime: None, // TODO how 'encrypted'?
                             foff: Some(cfo as i64),
                             ftstat: None,
                             ftver: None,
@@ -172,6 +175,30 @@ impl PacketForwarderClient {
                         },
                         _ => panic!("invalid SNR in received msg: {:?}", m.get("snr")),
                     };
+                    let timestamp_header_start_unix_time_nanos =
+                        if let Some(Pmt::U64(tmp)) = m.get("timestamp") {
+                            *tmp
+                        } else {
+                            panic!(
+                                "invalid timestamp in received msg: {:?}",
+                                m.get("timestamp")
+                            )
+                        };
+                    let timestamp = Duration::from_nanos(timestamp_header_start_unix_time_nanos);
+                    let timestamp = SystemTime::UNIX_EPOCH.checked_add(timestamp).unwrap();
+                    let tmst = (timestamp_header_start_unix_time_nanos / 1000) as u32; // overflowing 32bit counter with microsecond resolution, only meaningful w.r.t. this receiver instance / gateway
+                    let utc_time: DateTime<Utc> = timestamp.into();
+                    let time = Some(utc_time.format("%Y%m%dT%H%M%S%.6fZ").to_string());
+                    let gps_time_reference = chrono::NaiveDate::from_ymd_opt(1980, 1, 6)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap()
+                        .and_utc();
+                    let tmms = Some(
+                        utc_time
+                            .signed_duration_since(gps_time_reference)
+                            .num_milliseconds() as u64,
+                    );
                     let rxpk = RxPk::V2(RxPkV2 {
                         aesk: 0,
                         brd: 0,
@@ -184,10 +211,10 @@ impl PacketForwarderClient {
                         rsig: vec![received_signal_info],
                         size: payload.len() as u64,
                         stat,
-                        tmst: 0, // TODO
+                        tmst,
                         delayed: None,
-                        tmms: None,
-                        time: None,
+                        tmms,
+                        time,
                     });
                     let packet = Packet::from_rxpk(self.mac_addr, rxpk);
                     self.uplink_sender.send(packet).await.unwrap();

@@ -1,21 +1,21 @@
 use std::collections::HashMap;
+use std::time::SystemTime;
 
 use clap::Parser;
 use rustfft::num_complex::Complex32;
 
 use futuredsp::firdes::remez;
 use futuresdr::anyhow::Result;
-use futuresdr::blocks::{BlobToUdp, MessageAnnotator};
+use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::blocks::NullSink;
 use futuresdr::blocks::PfbArbResampler;
 use futuresdr::blocks::PfbChannelizer;
-use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::blocks::StreamDeinterleaver;
+use futuresdr::blocks::{BlobToUdp, MessageAnnotator};
 use futuresdr::macros::connect;
-use futuresdr::runtime::{Flowgraph, Pmt};
 use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Runtime;
-use lora::{Decoder, PacketForwarderClient};
+use futuresdr::runtime::{Flowgraph, Pmt};
 use lora::Deinterleaver;
 use lora::FftDemod;
 use lora::FrameSync;
@@ -23,6 +23,7 @@ use lora::GrayMapping;
 use lora::HammingDec;
 use lora::HeaderDecoder;
 use lora::HeaderMode;
+use lora::{Decoder, PacketForwarderClient};
 
 #[derive(Parser, Debug)]
 #[clap(version)]
@@ -79,6 +80,9 @@ fn main() -> Result<()> {
 
     let rt = Runtime::new();
     let mut fg = Flowgraph::new();
+
+    // streamer start time is relative to function call -> can not be used for precise rx timestamping -> just use the system time when constructing the flowgraph as a reference
+    let stream_start_time = SystemTime::now();
 
     let src = SourceBuilder::new()
         .sample_rate((NUM_CHANNELS_PADDED * CHANNEL_SPACING) as f64)
@@ -171,6 +175,7 @@ fn main() -> Result<()> {
                 None,
                 None,
                 false,
+                Some(stream_start_time),
             ));
             fg.connect_stream_with_type(
                 resampler,

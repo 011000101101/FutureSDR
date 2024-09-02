@@ -14,8 +14,8 @@ use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::WorkIo;
 use futuresdr::tracing::info;
 
-use crate::Frame;
 use crate::utilities::*;
+use crate::Frame;
 
 pub struct Decoder;
 

@@ -183,27 +183,27 @@ pub use zynq_sync::ZynqSync;
 pub use self::wgpu::Wgpu;
 
 mod apply;
-mod applynm;
 mod applyintoiter;
+mod applynm;
 pub mod audio;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod blob_to_udp;
-mod channel_source;
 mod channel_sink;
+mod channel_source;
 mod combine;
 mod console_sink;
 mod copy;
 mod copy_rand;
 mod delay;
-mod filter;
-mod fir;
 mod fft;
 #[cfg(not(target_arch = "wasm32"))]
 mod file_sink;
 #[cfg(not(target_arch = "wasm32"))]
 mod file_source;
+mod filter;
 mod finite_source;
+mod fir;
 mod head;
 mod iir;
 #[cfg(feature = "lttng")]
@@ -247,9 +247,9 @@ mod vulkan;
 pub mod wasm;
 
 #[cfg(not(target_arch = "wasm32"))]
-mod websocket_sink;
-#[cfg(not(target_arch = "wasm32"))]
 mod websocket_pmt_sink;
+#[cfg(not(target_arch = "wasm32"))]
+mod websocket_sink;
 #[cfg(feature = "wgpu")]
 mod wgpu;
 pub mod xlating_fir;
@@ -260,4 +260,3 @@ pub mod zeromq;
 mod zynq;
 #[cfg(feature = "zynq")]
 mod zynq_sync;
-
