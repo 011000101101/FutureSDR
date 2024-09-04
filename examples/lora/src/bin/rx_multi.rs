@@ -6,16 +6,16 @@ use rustfft::num_complex::Complex32;
 
 use futuredsp::firdes::remez;
 use futuresdr::anyhow::Result;
-use futuresdr::blocks::seify::SourceBuilder;
+use futuresdr::blocks::{BlobToUdp, MessageAnnotator};
 use futuresdr::blocks::NullSink;
 use futuresdr::blocks::PfbArbResampler;
 use futuresdr::blocks::PfbChannelizer;
-use futuresdr::blocks::StreamDeinterleaver;
-use futuresdr::blocks::{BlobToUdp, MessageAnnotator};
+use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::macros::connect;
+use futuresdr::runtime::{Flowgraph, Pmt};
 use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Runtime;
-use futuresdr::runtime::{Flowgraph, Pmt};
+use lora::{Decoder, PacketForwarderClient};
 use lora::Deinterleaver;
 use lora::FftDemod;
 use lora::FrameSync;
@@ -23,7 +23,6 @@ use lora::GrayMapping;
 use lora::HammingDec;
 use lora::HeaderDecoder;
 use lora::HeaderMode;
-use lora::{Decoder, PacketForwarderClient};
 
 #[derive(Parser, Debug)]
 #[clap(version)]
@@ -92,9 +91,6 @@ fn main() -> Result<()> {
         .args(args.args)?
         .build()?;
 
-    let deinterleaver = StreamDeinterleaver::<Complex32>::new(NUM_CHANNELS_PADDED);
-    connect!(fg, src > deinterleaver);
-
     let mut tagged_msg_out_ports: Vec<usize> = vec![];
 
     let transition_bw = (CHANNEL_SPACING - BANDWIDTH) as f64 / CHANNEL_SPACING as f64;
@@ -115,14 +111,7 @@ fn main() -> Result<()> {
         &channelizer_taps,
         1.0,
     ));
-    for i in 0..NUM_CHANNELS_PADDED {
-        fg.connect_stream(
-            deinterleaver,
-            format!("out{i}"),
-            channelizer,
-            format!("in{i}"),
-        )?;
-    }
+    connect!(fg, src > channelizer);
     for n_out in 0..NUM_CHANNELS_PADDED {
         let n_chan = map_port(n_out);
         if n_chan.is_none() {
