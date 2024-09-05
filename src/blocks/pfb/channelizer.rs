@@ -45,7 +45,7 @@ use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
 use crate::runtime::WorkIo;
 
-fn partition_filter_taps(
+pub fn partition_filter_taps(
     taps: &[f32],
     n_filters: usize,
 ) -> (Vec<FirFilter<Complex32, Complex32, Vec<f32>>>, usize) {
@@ -76,7 +76,7 @@ fn create_sio_builder(n_filters: usize) -> StreamIoBuilder {
 }
 
 #[derive(Clone, Debug)]
-struct WindowBuffer {
+pub struct WindowBuffer {
     buffer_len: usize,
     circular_buffer: Vec<Complex32>,
     start_idx: usize,
@@ -243,13 +243,10 @@ impl Kernel for PfbChannelizer {
             }
             // de-spin through IFFT
             self.ifft.process(&mut self.fft_buf);
-            // copy result to output, scale result by 1/num_channels (C transform)
-            let scaling_factor = 1.0 / self.num_channels as f32;
             // Send to output channels
             #[allow(clippy::needless_range_loop)]
             for channel_index in 0..self.num_channels {
-                outs[channel_index][output_sample_index] =
-                    self.fft_buf[channel_index] * scaling_factor;
+                outs[channel_index][output_sample_index] = self.fft_buf[channel_index];
             }
         }
         // commit sio buffers
@@ -260,7 +257,10 @@ impl Kernel for PfbChannelizer {
         }
         // each iteration either depletes the available input items or the available space in the out buffer, therefore no manual call_again necessary
         // appropriately propagate flowgraph termination
-        if sio.input(0).finished() {
+        if n_items_to_consume - n_items_to_produce_per_channel * self.decimation_factor
+            < self.decimation_factor
+            && sio.input(0).finished()
+        {
             io.finished = true;
             debug!("PfbChannelizer: Terminated.")
         }
