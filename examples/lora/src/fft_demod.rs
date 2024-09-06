@@ -87,7 +87,8 @@ impl FftDemod {
             lls: vec![0.; m_samples_per_symbol],
             llrs: [0.; MAX_SF],
         };
-        let mut sio = StreamIoBuilder::new().add_input::<Complex32>("in");
+        let mut sio =
+            StreamIoBuilder::new().add_input_with_size::<Complex32>("in", m_samples_per_symbol);
         if soft_decoding {
             sio = sio.add_output::<[LLR; MAX_SF]>("out")
         } else {

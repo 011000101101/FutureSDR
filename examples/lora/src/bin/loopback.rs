@@ -7,7 +7,6 @@ use futuresdr::anyhow::{anyhow, Result};
 use futuresdr::async_io::Timer;
 use futuresdr::blocks::BlobToUdp;
 use futuresdr::macros::connect;
-use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
@@ -104,7 +103,7 @@ fn main() -> Result<()> {
     let udp_data = BlobToUdp::new("127.0.0.1:55555");
     let udp_rftap = BlobToUdp::new("127.0.0.1:55556");
     connect!(fg,
-        transmitter [Circular::with_size((1 << usize::from(args.spreading_factor)) * 3 * args.oversampling)] frame_sync > fft_demod > gray_mapping > deinterleaver > hamming_dec > header_decoder;
+        transmitter > frame_sync > fft_demod > gray_mapping > deinterleaver > hamming_dec > header_decoder;
         header_decoder.frame_info | frame_sync.frame_info;
         header_decoder | decoder;
         decoder.crc_check | frame_sync.payload_crc_result;

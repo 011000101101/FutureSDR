@@ -1,9 +1,41 @@
 //! ## SDR Runtime
+use std::result;
+
 use futures::channel::mpsc;
 use futures::channel::oneshot;
-use futuresdr_types::PmtConversionError;
-use std::result;
 use thiserror::Error;
+
+pub use block::Block;
+pub use block::Kernel;
+pub use block::TypedBlock;
+pub use block::WorkIo;
+pub use block_meta::BlockMeta;
+pub use block_meta::BlockMetaBuilder;
+use buffer::BufferReader;
+use buffer::BufferWriter;
+pub use flowgraph::Flowgraph;
+pub use flowgraph::FlowgraphHandle;
+pub use futuresdr_types::BlockDescription;
+pub use futuresdr_types::FlowgraphDescription;
+pub use futuresdr_types::Pmt;
+use futuresdr_types::PmtConversionError;
+pub use futuresdr_types::PortId;
+pub use message_io::MessageInput;
+pub use message_io::MessageIo;
+pub use message_io::MessageIoBuilder;
+pub use message_io::MessageOutput;
+pub use mocker::Mocker;
+pub use runtime::Runtime;
+pub use runtime::RuntimeHandle;
+pub use stream_io::StreamInput;
+pub use stream_io::StreamIo;
+pub use stream_io::StreamIoBuilder;
+pub use stream_io::StreamOutput;
+pub use tag::ItemTag;
+pub use tag::Tag;
+pub use topology::Topology;
+
+use crate::runtime::ctrl_port::ControlPort;
 
 mod block;
 mod block_meta;
@@ -15,8 +47,6 @@ mod ctrl_port;
 #[cfg(target_arch = "wasm32")]
 #[path = "ctrl_port_wasm.rs"]
 mod ctrl_port;
-use crate::runtime::ctrl_port::ControlPort;
-
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 mod logging;
 #[cfg(target_os = "android")]
@@ -35,37 +65,6 @@ pub mod scheduler;
 pub mod stream_io;
 mod tag;
 mod topology;
-
-pub use block::Block;
-pub use block::Kernel;
-pub use block::TypedBlock;
-pub use block::WorkIo;
-pub use block_meta::BlockMeta;
-pub use block_meta::BlockMetaBuilder;
-pub use flowgraph::Flowgraph;
-pub use flowgraph::FlowgraphHandle;
-pub use message_io::MessageInput;
-pub use message_io::MessageIo;
-pub use message_io::MessageIoBuilder;
-pub use message_io::MessageOutput;
-pub use mocker::Mocker;
-pub use runtime::Runtime;
-pub use runtime::RuntimeHandle;
-pub use stream_io::StreamInput;
-pub use stream_io::StreamIo;
-pub use stream_io::StreamIoBuilder;
-pub use stream_io::StreamOutput;
-pub use tag::ItemTag;
-pub use tag::Tag;
-pub use topology::Topology;
-
-pub use futuresdr_types::BlockDescription;
-pub use futuresdr_types::FlowgraphDescription;
-pub use futuresdr_types::Pmt;
-pub use futuresdr_types::PortId;
-
-use buffer::BufferReader;
-use buffer::BufferWriter;
 
 /// Initialize runtime
 ///
@@ -220,6 +219,9 @@ pub enum Error {
     /// Connect Error
     #[error("Connect Error {0}, {1:?} -> {2}, {3:?}")]
     ConnectError(usize, PortId, usize, PortId),
+    /// Insufficient buffer size for connection Error
+    #[error("Insufficient buffer size between {0}, {1:?} -> {2}, {3:?}: min. {4} bytes required.")]
+    InsufficientBufferSize(usize, PortId, usize, PortId, usize),
     /// Error in handler
     #[error("Error in handler")]
     HandlerError,

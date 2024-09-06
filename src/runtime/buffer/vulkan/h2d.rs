@@ -1,7 +1,8 @@
-use futures::channel::mpsc::Sender;
-use futures::prelude::*;
 use std::any::Any;
 use std::sync::{Arc, Mutex};
+
+use futures::channel::mpsc::Sender;
+use futures::prelude::*;
 
 use crate::runtime::buffer::vulkan::BufferEmpty;
 use crate::runtime::buffer::vulkan::BufferFull;
@@ -40,6 +41,10 @@ impl BufferBuilder for H2D {
         writer_output_id: usize,
     ) -> BufferWriter {
         WriterH2D::new(item_size, writer_inbox, writer_output_id)
+    }
+
+    fn get_size(&self) -> usize {
+        usize::MAX_VALUE // TODO how to get the size of the buffer when empty?
     }
 }
 

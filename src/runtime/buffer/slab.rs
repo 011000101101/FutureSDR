@@ -1,8 +1,9 @@
-use futures::channel::mpsc::Sender;
-use futures::prelude::*;
 use std::any::Any;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+
+use futures::channel::mpsc::Sender;
+use futures::prelude::*;
 
 use crate::runtime::buffer::BufferBuilder;
 use crate::runtime::buffer::BufferReader;
@@ -82,6 +83,10 @@ impl BufferBuilder for Slab {
             writer_inbox,
             writer_output_id,
         )
+    }
+
+    fn get_size(&self) -> usize {
+        self.min_bytes - self.reserved_items
     }
 }
 

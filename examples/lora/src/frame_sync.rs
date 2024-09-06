@@ -206,8 +206,11 @@ impl FrameSync {
         Block::new(
             BlockMetaBuilder::new("FrameSync").build(),
             StreamIoBuilder::new()
-                .add_input::<Complex32>("in")
-                .add_output::<Complex32>("out")
+                .add_input_with_size::<Complex32>(
+                    "in",
+                    m_samples_per_symbol_tmp * 2 + os_factor / 2,
+                )
+                .add_output_with_size::<Complex32>("out", m_number_of_bins_tmp)
                 .build(),
             MessageIoBuilder::new()
                 .add_input("bandwidth", Self::bandwidth_handler)
@@ -1471,7 +1474,6 @@ impl FrameSync {
                 SyncState::Downchirp2 => {
                     samples_left_in_input
                         >= self.m_samples_per_symbol - ADDITIONAL_SAMPLES_FOR_NET_ID_RESYNCHING
-                        && space_left_in_output >= self.m_samples_per_symbol
                 }
                 SyncState::QuarterDown => {
                     samples_left_in_input

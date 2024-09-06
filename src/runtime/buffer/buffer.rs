@@ -1,6 +1,7 @@
-use futures::channel::mpsc::Sender;
 use std::any::Any;
 use std::fmt::Debug;
+
+use futures::channel::mpsc::Sender;
 
 use crate::runtime::BlockMessage;
 use crate::runtime::ItemTag;
@@ -16,6 +17,9 @@ pub trait BufferBuilder: Send + Sync + Any {
         writer_inbox: Sender<BlockMessage>,
         writer_output_id: usize,
     ) -> BufferWriter;
+
+    ///return the size of the buffer in bytes
+    fn get_size(&self) -> usize;
 }
 
 /// CPU buffer writer

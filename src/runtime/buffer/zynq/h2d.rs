@@ -1,8 +1,9 @@
-use futures::channel::mpsc::Sender;
-use futures::SinkExt;
 use std::any::Any;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+
+use futures::channel::mpsc::Sender;
+use futures::SinkExt;
 
 use crate::runtime::buffer::zynq::BufferEmpty;
 use crate::runtime::buffer::zynq::BufferFull;
@@ -52,6 +53,10 @@ impl BufferBuilder for H2D {
         writer_output_id: usize,
     ) -> BufferWriter {
         WriterH2D::new(item_size, self.max_bytes, writer_inbox, writer_output_id)
+    }
+
+    fn get_size(&self) -> usize {
+        self.max_bytes
     }
 }
 

@@ -1,8 +1,9 @@
-use futures::channel::mpsc::Sender;
-use futures::SinkExt;
 use std::any::Any;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+
+use futures::channel::mpsc::Sender;
+use futures::SinkExt;
 
 use crate::runtime::buffer::zynq::BufferEmpty;
 use crate::runtime::buffer::zynq::BufferFull;
@@ -41,6 +42,10 @@ impl BufferBuilder for D2H {
         writer_output_id: usize,
     ) -> BufferWriter {
         WriterD2H::new(item_size, writer_inbox, writer_output_id)
+    }
+
+    fn get_size(&self) -> usize {
+        usize::MAX_VALUE // TODO how to get the size of the buffer when empty?
     }
 }
 

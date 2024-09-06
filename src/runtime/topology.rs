@@ -1,5 +1,10 @@
-use futures::channel::mpsc::Sender;
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
+
+use futures::channel::mpsc::Sender;
+use slab::Slab;
 
 use crate::runtime::buffer::BufferBuilder;
 use crate::runtime::buffer::BufferWriter;
@@ -7,10 +12,6 @@ use crate::runtime::Block;
 use crate::runtime::BlockMessage;
 use crate::runtime::Error;
 use crate::runtime::PortId;
-use slab::Slab;
-use std::any::{Any, TypeId};
-use std::fmt::Debug;
-use std::hash::{Hash, Hasher};
 
 pub trait BufferBuilderKey: Debug + Send + Sync {
     fn eq(&self, other: &dyn BufferBuilderKey) -> bool;
@@ -208,6 +209,21 @@ impl Topology {
             }
         };
         let dp = dst.stream_input(dst_port_id);
+
+        if (sp.get_minimum_buffer_size() + dp.get_minimum_buffer_size()).saturating_sub(1)
+            > buffer_builder.get_size()
+        {
+            // "Insufficient buffer size between {:?}.{} and {:?}.{}. Might cause deadlocks. The required minimum buffer size is {} bytes, but a larger buffer should be preferred for efficiency. If you used an explicitly defined buffer, it is too small. Otherwise, the configured default buffer size is too small. Either increase it, or connect these ports using an explicitly defined buffer of sufficient size.", src, src_port, dst, dst_port, sp
+            // .get_minimum_buffer_size()
+            // .max(dp.get_minimum_buffer_size()));
+            return Err(Error::InsufficientBufferSize(
+                src_block,
+                src_port,
+                dst_block,
+                dst_port,
+                (sp.get_minimum_buffer_size() + dp.get_minimum_buffer_size()).saturating_sub(1),
+            ));
+        }
 
         if sp.type_id() != dp.type_id() {
             return Err(Error::ConnectError(

@@ -1,7 +1,8 @@
-use futures::channel::mpsc::Sender;
-use futures::prelude::*;
 use std::any::Any;
 use std::fmt;
+
+use futures::channel::mpsc::Sender;
+use futures::prelude::*;
 use vmcircbuffer::generic;
 
 use crate::runtime::buffer::BufferBuilder;
@@ -94,6 +95,10 @@ impl BufferBuilder for Circular {
             writer_inbox,
             writer_output_id,
         )))
+    }
+
+    fn get_size(&self) -> usize {
+        self.min_bytes
     }
 }
 

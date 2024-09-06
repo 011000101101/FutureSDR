@@ -6,16 +6,15 @@ use rustfft::num_complex::Complex32;
 
 use futuredsp::firdes::remez;
 use futuresdr::anyhow::Result;
-use futuresdr::blocks::{BlobToUdp, MessageAnnotator};
+use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::blocks::NullSink;
 use futuresdr::blocks::PfbArbResampler;
 use futuresdr::blocks::PfbChannelizer;
-use futuresdr::blocks::seify::SourceBuilder;
+use futuresdr::blocks::{BlobToUdp, MessageAnnotator};
 use futuresdr::macros::connect;
-use futuresdr::runtime::{Flowgraph, Pmt};
 use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Runtime;
-use lora::{Decoder, PacketForwarderClient};
+use futuresdr::runtime::{Flowgraph, Pmt};
 use lora::Deinterleaver;
 use lora::FftDemod;
 use lora::FrameSync;
@@ -23,6 +22,7 @@ use lora::GrayMapping;
 use lora::HammingDec;
 use lora::HeaderDecoder;
 use lora::HeaderMode;
+use lora::{Decoder, PacketForwarderClient};
 
 #[derive(Parser, Debug)]
 #[clap(version)]

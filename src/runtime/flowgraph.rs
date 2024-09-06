@@ -1,10 +1,11 @@
-use futures::channel::mpsc::Sender;
-use futures::channel::oneshot;
-use futures::SinkExt;
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::result;
+
+use futures::channel::mpsc::Sender;
+use futures::channel::oneshot;
+use futures::SinkExt;
 
 use crate::anyhow::Result;
 #[cfg(not(target_arch = "wasm32"))]
@@ -13,6 +14,7 @@ use crate::runtime::buffer::circular::Circular;
 use crate::runtime::buffer::slab::Slab;
 use crate::runtime::buffer::BufferBuilder;
 use crate::runtime::buffer::BufferWriter;
+use crate::runtime::config;
 use crate::runtime::Block;
 use crate::runtime::BlockDescription;
 use crate::runtime::BlockMessage;
@@ -23,6 +25,7 @@ use crate::runtime::Kernel;
 use crate::runtime::Pmt;
 use crate::runtime::PortId;
 use crate::runtime::Topology;
+use crate::tracing::warn;
 
 /// The main component of any FutureSDR program.
 ///
@@ -49,17 +52,38 @@ impl Flowgraph {
     pub fn connect_stream(
         &mut self,
         src_block: usize,
-        src_port: impl Into<PortId>,
+        src_port: impl Into<PortId> + Clone,
         dst_block: usize,
-        dst_port: impl Into<PortId>,
+        dst_port: impl Into<PortId> + Clone,
     ) -> Result<(), Error> {
-        self.topology.as_mut().unwrap().connect_stream(
+        match self.topology.as_mut().unwrap().connect_stream(
             src_block,
-            src_port.into(),
+            src_port.clone().into(),
             dst_block,
-            dst_port.into(),
+            dst_port.clone().into(),
             DefaultBuffer::new(),
-        )
+        ) {
+            Ok(()) => Ok(()),
+            Err(Error::InsufficientBufferSize(
+                src_blk,
+                src_prt,
+                dst_blk,
+                dst_prt,
+                minimum_buffer_size,
+            )) => {
+                // let buffer_size = (minimum_buffer_size as f32 * config::config().buffer_capacity_to_minimum_size_ratio).ceil() as usize;
+                let buffer_size = minimum_buffer_size * 2;
+                warn!("Default buffer size ({} bytes) insufficient for stream connection between {0}.{1:?} and {2}.{3:?}. Requires at least {minimum_buffer_size} bytes. Trying to connect with a Circular buffer with a capacity of at least {buffer_size} bytes.", src_blk, src_prt, dst_blk, dst_prt); // TODO this doesn't print
+                self.connect_stream_with_type(
+                    src_block,
+                    src_port,
+                    dst_block,
+                    dst_port,
+                    Circular::with_size(minimum_buffer_size),
+                )
+            }
+            any_error => any_error,
+        }
     }
 
     /// Make stream connection, using the given buffer
@@ -255,5 +279,9 @@ impl BufferBuilder for DefaultBuffer {
         writer_output_id: usize,
     ) -> BufferWriter {
         Slab::new().build(item_size, writer_inbox, writer_output_id)
+    }
+
+    fn get_size(&self) -> usize {
+        config::config().buffer_size
     }
 }

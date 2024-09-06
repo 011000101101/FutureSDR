@@ -1,10 +1,11 @@
 //! Stream-based Ports
-use futures::channel::mpsc::Sender;
 use std::any::Any;
 use std::any::TypeId;
 use std::fmt;
 use std::mem;
 use std::slice;
+
+use futures::channel::mpsc::Sender;
 
 use crate::runtime::buffer::BufferReader;
 use crate::runtime::buffer::BufferWriter;
@@ -29,6 +30,7 @@ unsafe impl Send for CurrentInput {}
 pub struct StreamInput {
     name: String,
     item_size: usize,
+    min_buffer_size: usize,
     type_id: TypeId,
     reader: Option<BufferReader>,
     current: Option<CurrentInput>,
@@ -41,6 +43,7 @@ impl StreamInput {
         StreamInput {
             name: name.to_string(),
             item_size: std::mem::size_of::<T>(),
+            min_buffer_size: 0,
             type_id: TypeId::of::<T>(),
             reader: None,
             current: None,
@@ -51,6 +54,16 @@ impl StreamInput {
     /// Get size of items, handled by the port
     pub fn item_size(&self) -> usize {
         self.item_size
+    }
+
+    /// Set the minimum size in bytes of the buffer to be connected to this port
+    pub fn set_minimum_buffer_size(&mut self, size_in_bytes: usize) {
+        self.min_buffer_size = size_in_bytes;
+    }
+
+    /// Get the minimum size in bytes of the buffer to be connected to this port, defaults to 0 if not set explicitly
+    pub fn get_minimum_buffer_size(&self) -> usize {
+        self.min_buffer_size
     }
 
     /// Get [`TypeId`] of items, handled by the port
@@ -184,6 +197,7 @@ impl StreamInput {
 pub struct StreamOutput {
     name: String,
     item_size: usize,
+    min_buffer_size: usize,
     type_id: TypeId,
     writer: Option<BufferWriter>,
     tags: Vec<ItemTag>,
@@ -196,6 +210,7 @@ impl StreamOutput {
         StreamOutput {
             name: name.to_string(),
             item_size: std::mem::size_of::<T>(),
+            min_buffer_size: 0,
             type_id: TypeId::of::<T>(),
             writer: None,
             tags: Vec::new(),
@@ -206,6 +221,16 @@ impl StreamOutput {
     /// Get size of items, handled by the port
     pub fn item_size(&self) -> usize {
         self.item_size
+    }
+
+    /// Set the minimum size in bytes of the buffer to be connected to this port
+    pub fn set_minimum_buffer_size(&mut self, size_in_bytes: usize) {
+        self.min_buffer_size = size_in_bytes;
+    }
+
+    /// Get the minimum size in bytes of the buffer to be connected to this port, defaults to 0 if not set explicitly
+    pub fn get_minimum_buffer_size(&self) -> usize {
+        self.min_buffer_size
     }
 
     /// Get [`TypeId`] of items, handled by the port
@@ -480,10 +505,28 @@ impl StreamIoBuilder {
         self
     }
 
+    /// Add input port with minimum buffer size (in number of items)
+    #[must_use]
+    pub fn add_input_with_size<T: Any>(mut self, name: &str, size: usize) -> StreamIoBuilder {
+        let mut input = StreamInput::new::<T>(name);
+        input.set_minimum_buffer_size(size * std::mem::size_of::<T>());
+        self.inputs.push(input);
+        self
+    }
+
     /// Add output port
     #[must_use]
     pub fn add_output<T: Any>(mut self, name: &str) -> StreamIoBuilder {
         self.outputs.push(StreamOutput::new::<T>(name));
+        self
+    }
+
+    /// Add output port with minimum buffer size (in number of items)
+    #[must_use]
+    pub fn add_output_with_size<T: Any>(mut self, name: &str, size: usize) -> StreamIoBuilder {
+        let mut output = StreamOutput::new::<T>(name);
+        output.set_minimum_buffer_size(size * std::mem::size_of::<T>());
+        self.outputs.push(output);
         self
     }
 

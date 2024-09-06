@@ -1,8 +1,9 @@
-use futures::channel::mpsc::Sender;
-use futures::prelude::*;
 use std::any::Any;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+
+use futures::channel::mpsc::Sender;
+use futures::prelude::*;
 
 use crate::runtime::buffer::wgpu::InputBufferEmpty as BufferEmpty;
 use crate::runtime::buffer::wgpu::InputBufferFull as BufferFull;
@@ -41,6 +42,10 @@ impl BufferBuilder for H2D {
         writer_output_id: usize,
     ) -> BufferWriter {
         WriterH2D::new(item_size, writer_inbox, writer_output_id)
+    }
+
+    fn get_size(&self) -> usize {
+        usize::MAX_VALUE // TODO how to get the size of the buffer when empty?
     }
 }
 
