@@ -30,8 +30,8 @@ use rustfft::Fft;
 use rustfft::FftDirection;
 use rustfft::FftPlanner;
 
-use futuredsp::FirFilter;
 use futuredsp::prelude::*;
+use futuredsp::FirFilter;
 
 use crate::anyhow::Result;
 use crate::num_complex::Complex32;

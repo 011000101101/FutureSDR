@@ -1,9 +1,37 @@
-use anyhow::Result;
-use futuredsp::prelude::*;
-use futuredsp::FirFilter;
-use num_complex::Complex32;
+/*
+ * Derived from the liquid-dsp project.
+ * Original copyright and license:
+ *
+ * Copyright (c) 2007 - 2024 Joseph Gaeddert
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
 use std::cmp::min;
 
+use anyhow::Result;
+use num_complex::Complex32;
+
+use futuredsp::prelude::*;
+use futuredsp::FirFilter;
+
+use crate::blocks::pfb::channelizer::{partition_filter_taps, WindowBuffer};
 use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
@@ -14,94 +42,44 @@ use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
 use crate::runtime::WorkIo;
 
+enum ResampState {
+    Interpolate,
+    Boundary,
+}
+
 /// Polyphase Arbitrary Rate Resampler
 pub struct PfbArbResampler {
-    rate: f32,
-    /* The number of filters is specified by the user as the
-       filter size; this is also the interpolation rate of the
-       filter. We use it and the rate provided to determine the
-       decimation rate. This acts as a rational resampler. The
-       flt_rate is calculated as the residual between the integer
-       decimation rate and the real decimation rate and will be
-       used to determine to interpolation point of the resampling
-       process.
-    */
     num_filters: usize,
-    n_taps_per_filter: usize,
     fir_filters: Vec<FirFilter<Complex32, Complex32, Vec<f32>>>,
-    diff_filters: Vec<FirFilter<Complex32, Complex32, Vec<f32>>>,
-    filter_index: usize,
-    dec_rate: usize,
-    // This calculation finds the phase offset induced by the
-    // arbitrary resampling. It's based on which filter arm we are
-    // at the filter's group delay plus the fractional offset
-    // between the samples. Calculated here based on the rotation
-    // around nfilts starting at start_filter.
-    accum: f32, // accumulator; holds fractional part of sample
-    // residual rate for the linear interpolation
-    flt_rate: f32,
-    buff: [Complex32; 2],
+    window_buf: WindowBuffer,
+    rate: f32,
+    delay: f32,
+    buff: [Complex32; 2], // [y0, y1]
+    state: ResampState,
+    tau: f32,          // accumulated timing phase
+    bf: f32,           // soft-valued filterbank index
+    base_index: usize, // base filterbank index
+    mu: f32,           // fractional filterbank interpolation value
 }
 
 impl PfbArbResampler {
-    fn taps_per_filter(num_taps: usize, num_filts: usize) -> usize {
-        (num_taps as f32 / num_filts as f32).ceil() as usize
-    }
-
-    fn create_diff_taps(taps: &[f32]) -> Vec<f32> {
-        let diff_filter: [f32; 2] = [-1., 1.];
-        let mut diff_taps: Vec<f32> = vec![0.; taps.len()];
-        for i in 0..taps.len() - 1 {
-            for j in 0..2 {
-                diff_taps[i] += diff_filter[j] * taps[i + j];
-            }
-        }
-        diff_taps[taps.len() - 1] = 0.;
-        diff_taps
-    }
-
-    fn create_taps(
-        taps: &[f32],
-        num_filters: usize,
-    ) -> Vec<FirFilter<Complex32, Complex32, Vec<f32>>> {
-        let taps_per_filter = Self::taps_per_filter(taps.len(), num_filters);
-        // Make a vector of the taps plus fill it out with 0's to fill
-        // each polyphase filter with exactly d_taps_per_filter
-        let mut fir_filters = vec![];
-        for i in 0..num_filters {
-            let mut taps_tmp: Vec<f32> = taps[i..].iter().step_by(num_filters).copied().collect();
-            if taps_tmp.len() < taps_per_filter {
-                taps_tmp.push(0.);
-            }
-            fir_filters.push(FirFilter::<Complex32, Complex32, _>::new(taps_tmp));
-        }
-        fir_filters
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn build_filterbank(
-        taps: &[f32],
-        num_filters: usize,
-    ) -> (
-        Vec<FirFilter<Complex32, Complex32, Vec<f32>>>,
-        Vec<FirFilter<Complex32, Complex32, Vec<f32>>>,
-    ) {
-        let diff_taps = Self::create_diff_taps(taps);
-        let filters = Self::create_taps(taps, num_filters);
-        let diff_filters = Self::create_taps(&diff_taps, num_filters);
-        (filters, diff_filters)
-    }
-
     /// Create Arbitrary Rate Resampler.
     #[allow(clippy::new_ret_no_self)]
     pub fn new(rate: f32, taps: &[f32], num_filters: usize) -> Block {
-        let (filters, diff_filters) = Self::build_filterbank(taps, num_filters);
-        let n_taps_per_filter = Self::taps_per_filter(taps.len(), num_filters);
-
-        let dec_rate: f32 = (num_filters as f32 / rate).floor();
-        let flt_rate = (num_filters as f32 / rate) - dec_rate;
-
-        let starting_filter = (taps.len() / 2) % num_filters;
+        // // validate input
+        // if (_rate <= 0)
+        // return liquid_error_config("resamp_%s_create(), resampling rate must be greater than zero", EXTENSION_FULL);
+        // if (_m == 0)
+        // return liquid_error_config("resamp_%s_create(), filter semi-length must be greater than zero", EXTENSION_FULL);
+        // if (_fc <= 0.0f || _fc >= 0.5f)
+        // return liquid_error_config("resamp_%s_create(), filter cutoff must be in (0,0.5)", EXTENSION_FULL);
+        // if (_as <= 0.0f)
+        // return liquid_error_config("resamp_%s_create(), filter stop-band suppression must be greater than zero", EXTENSION_FULL);
+        // if (_npfb == 0)
+        // return liquid_error_config("resamp_%s_create(), number of filter banks must be greater than zero", EXTENSION_FULL);
+        // if (_rate <= 0)
+        // return liquid_error(LIQUID_EICONFIG,"resamp_%s_set_rate(), resampling rate must be greater than zero", EXTENSION_FULL);
+        let (partitioned_filters, filter_length) = partition_filter_taps(taps, num_filters);
 
         Block::new(
             BlockMetaBuilder::new("PfbArbResampler").build(),
@@ -111,18 +89,78 @@ impl PfbArbResampler {
                 .build(),
             MessageIoBuilder::new().build(),
             PfbArbResampler {
-                rate,
                 num_filters,
-                n_taps_per_filter,
-                fir_filters: filters,
-                diff_filters,
-                filter_index: starting_filter,
-                dec_rate: dec_rate as usize,
-                accum: 0.0,
-                flt_rate,
+                fir_filters: partitioned_filters,
+                window_buf: WindowBuffer::new(filter_length, false),
+                rate,
+                delay: 1.0 / rate,
                 buff: [Complex32::new(0., 0.); 2],
+                state: ResampState::Interpolate,
+                tau: 0.0,
+                bf: 0.0,
+                base_index: 0,
+                mu: 0.0,
             },
         )
+    }
+
+    /// update timing state; increment output timing stride and quantize filterbank indices
+    fn update_timing_state(&mut self) {
+        // update high-resolution timing phase
+        self.tau += self.delay;
+        // convert to high-resolution filterbank index
+        self.bf = self.tau * self.num_filters as f32;
+        // split into integer filterbank index and fractional interpolation
+        self.base_index = self.bf.floor() as usize; // base index
+        self.mu = self.bf - self.base_index as f32; // fractional index
+    }
+
+    fn consume_single(&mut self, sample: Complex32, out_buf: &mut [Complex32]) -> usize {
+        self.window_buf.push(sample);
+        let mut produced: usize = 0;
+        while self.base_index < self.num_filters {
+            match self.state {
+                ResampState::Boundary => {
+                    // compute filterbank output
+                    self.fir_filters[0]
+                        .filter(self.window_buf.get_as_slice(), &mut self.buff[1..2]);
+                    // interpolate
+                    out_buf[produced] = (1.0 - self.mu) * self.buff[0] + self.mu * self.buff[1];
+                    produced += 1;
+                    self.update_timing_state();
+                    self.state = ResampState::Interpolate;
+                }
+                ResampState::Interpolate => {
+                    // compute output at base index
+                    self.fir_filters[self.base_index]
+                        .filter(self.window_buf.get_as_slice(), &mut self.buff[0..1]);
+                    // check to see if base index is last filter in the bank, in
+                    // which case the resampler needs an additional input sample
+                    // to finish the linear interpolation process
+                    if self.base_index == self.num_filters - 1 {
+                        // last filter: need additional input sample
+                        self.state = ResampState::Boundary;
+
+                        // set index to indicate new sample is needed
+                        self.base_index = self.num_filters;
+                    } else {
+                        // do not need additional input sample; compute
+                        // output at incremented base index
+                        self.fir_filters[self.base_index + 1]
+                            .filter(self.window_buf.get_as_slice(), &mut self.buff[1..2]);
+                        // perform linear interpolation between filterbank outputs
+                        out_buf[produced] = (1.0 - self.mu) * self.buff[0] + self.mu * self.buff[1];
+                        produced += 1;
+                        self.update_timing_state();
+                    }
+                }
+            }
+        }
+        // decrement timing phase by one sample
+        self.tau -= 1.0;
+        self.bf -= self.num_filters as f32;
+        self.base_index -= self.num_filters;
+        produced
     }
 }
 
@@ -136,45 +174,32 @@ impl Kernel for PfbArbResampler {
         _b: &mut BlockMeta,
     ) -> Result<()> {
         let input = sio.input(0).slice::<Complex32>();
-        let ninput_items = input
-            .len()
-            .saturating_sub(self.rate as usize + self.n_taps_per_filter - 1);
+        let ninput_items = input.len();
+        // fill filter history
+        if !self.window_buf.filled() {
+            let mut consumed = 0;
+            while !self.window_buf.filled() && consumed < ninput_items {
+                self.window_buf.push(input[consumed]);
+                consumed += 1;
+            }
+            sio.input(0).consume(consumed);
+            if ninput_items - consumed > 0 {
+                io.call_again = true;
+            }
+            return Ok(());
+        }
         let out = sio.output(0).slice::<Complex32>();
         let noutput_items = out.len();
         let nitem_to_process = min(ninput_items, (noutput_items as f32 / self.rate) as usize);
         if nitem_to_process > 0 {
-            let mut i_in: usize = 0;
-            let mut i_out: usize = 0;
-
-            while i_in < nitem_to_process {
-                // start j by wrapping around mod the number of channels
-                while self.filter_index < self.num_filters {
-                    // Take the current filter and derivative filter output
-                    self.fir_filters[self.filter_index].filter(
-                        &input[i_in..i_in + self.n_taps_per_filter],
-                        &mut self.buff[0..1],
-                    );
-                    self.diff_filters[self.filter_index].filter(
-                        &input[i_in..i_in + self.n_taps_per_filter],
-                        &mut self.buff[1..2],
-                    );
-
-                    out[i_out] = self.buff[0] + self.buff[1] * self.accum; // linearly interpolate between samples
-                    i_out += 1;
-
-                    // Adjust accumulator and index into filterbank
-                    self.accum += self.flt_rate;
-                    self.filter_index += self.dec_rate + self.accum.floor() as usize;
-                    self.accum %= 1.0;
-                }
-                i_in += self.filter_index / self.num_filters;
-                self.filter_index %= self.num_filters;
+            let mut produced: usize = 0;
+            for sample in input.iter().take(nitem_to_process) {
+                produced += self.consume_single(*sample, &mut out[produced..])
             }
-
-            sio.input(0).consume(i_in);
-            sio.output(0).produce(i_out);
+            sio.input(0).consume(nitem_to_process);
+            sio.output(0).produce(produced);
         }
-        if ninput_items - nitem_to_process < self.n_taps_per_filter && sio.input(0).finished() {
+        if ninput_items - nitem_to_process == 0 && sio.input(0).finished() {
             io.finished = true;
         }
         Ok(())
