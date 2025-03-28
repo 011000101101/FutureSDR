@@ -25,22 +25,24 @@
 
 use std::cmp::min;
 
-use anyhow::Result;
 use num_complex::Complex32;
 
 use futuredsp::prelude::*;
 use futuredsp::FirFilter;
 
-use crate::blocks::pfb::channelizer::{partition_filter_taps, WindowBuffer};
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
+
+use super::utilities::partition_filter_taps;
+use super::window_buffer::WindowBuffer;
 
 enum ResampState {
     Interpolate,
@@ -65,27 +67,28 @@ pub struct PfbArbResampler {
 impl PfbArbResampler {
     /// Create Arbitrary Rate Resampler.
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(rate: f32, taps: &[f32], num_filters: usize) -> Block {
-        // // validate input
-        // if (_rate <= 0)
-        // return liquid_error_config("resamp_%s_create(), resampling rate must be greater than zero", EXTENSION_FULL);
-        // if (_m == 0)
-        // return liquid_error_config("resamp_%s_create(), filter semi-length must be greater than zero", EXTENSION_FULL);
-        // if (_fc <= 0.0f || _fc >= 0.5f)
-        // return liquid_error_config("resamp_%s_create(), filter cutoff must be in (0,0.5)", EXTENSION_FULL);
-        // if (_as <= 0.0f)
-        // return liquid_error_config("resamp_%s_create(), filter stop-band suppression must be greater than zero", EXTENSION_FULL);
-        // if (_npfb == 0)
-        // return liquid_error_config("resamp_%s_create(), number of filter banks must be greater than zero", EXTENSION_FULL);
-        // if (_rate <= 0)
-        // return liquid_error(LIQUID_EICONFIG,"resamp_%s_set_rate(), resampling rate must be greater than zero", EXTENSION_FULL);
+    pub fn new(rate: f32, taps: &[f32], num_filters: usize) -> TypedBlock<Self> {
+        // validate input
+        assert!(
+            rate > 0.,
+            "PfbArbResampler: resampling rate must be greater than zero"
+        );
+        assert!(
+            taps.len() >= num_filters,
+            "PfbArbResampler: prototype filter length must be at least num_filters"
+        );
+        assert_ne!(
+            num_filters, 0,
+            "PfbArbResampler: number of filter banks must be greater than zero"
+        );
+
         let (partitioned_filters, filter_length) = partition_filter_taps(taps, num_filters);
 
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("PfbArbResampler").build(),
             StreamIoBuilder::new()
                 .add_input::<Complex32>("in")
-                .add_output::<Complex32>("out")
+                .add_output_with_size::<Complex32>("out", rate.ceil() as usize)
                 .build(),
             MessageIoBuilder::new().build(),
             PfbArbResampler {
@@ -185,6 +188,8 @@ impl Kernel for PfbArbResampler {
             sio.input(0).consume(consumed);
             if ninput_items - consumed > 0 {
                 io.call_again = true;
+            } else if sio.input(0).finished() {
+                io.finished = true;
             }
             return Ok(());
         }

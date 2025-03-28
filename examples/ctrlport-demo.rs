@@ -1,7 +1,6 @@
-use futuresdr::anyhow::Result;
+use anyhow::Result;
 use futuresdr::macros::async_trait;
 use futuresdr::macros::message_handler;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Flowgraph;
@@ -11,12 +10,13 @@ use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
 use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 
 fn main() -> Result<()> {
     let mut fg = Flowgraph::new();
 
-    fg.add_block(CtrlPortDemo::new());
+    fg.add_block(CtrlPortDemo::new())?;
 
     Runtime::new().run(fg)?;
     Ok(())
@@ -28,8 +28,8 @@ pub struct CtrlPortDemo {
 
 impl CtrlPortDemo {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("CtrlPortDemo").build(),
             StreamIoBuilder::new().build(),
             MessageIoBuilder::new()

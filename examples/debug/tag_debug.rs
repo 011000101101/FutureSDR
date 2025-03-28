@@ -1,21 +1,21 @@
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::TagDebug;
 use futuresdr::blocks::VectorSource;
 use futuresdr::macros::async_trait;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::Runtime;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     let mut fg = Flowgraph::new();
 
     let n_items = 10000;
@@ -25,10 +25,10 @@ fn main() -> Result<()> {
         .take(n_items)
         .collect();
 
-    let src = fg.add_block(VectorSource::new(dummy_signal));
+    let src = fg.add_block(VectorSource::new(dummy_signal))?;
     // Add a tag every 5 samples
-    let tagger = fg.add_block(PeriodicTagger::new(5));
-    let snk = fg.add_block(TagDebug::<f32>::new("PeriodicTaggerDebugger"));
+    let tagger = fg.add_block(PeriodicTagger::new(5))?;
+    let snk = fg.add_block(TagDebug::<f32>::new("PeriodicTaggerDebugger"))?;
 
     fg.connect_stream(src, "out", tagger, "in")?;
     fg.connect_stream(tagger, "out", snk, "in")?;
@@ -44,8 +44,8 @@ pub struct PeriodicTagger {
 
 impl PeriodicTagger {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(period: usize) -> Block {
-        Block::new(
+    pub fn new(period: usize) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("PeriodicTagger").build(),
             StreamIoBuilder::new()
                 .add_input::<f32>("in")

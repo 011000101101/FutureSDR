@@ -5,26 +5,42 @@ use seify::GenericDevice;
 use seify::TxStreamer;
 use std::time::Duration;
 
-use crate::anyhow::{Context, Result};
 use crate::blocks::seify::Builder;
 use crate::blocks::seify::Config;
 use crate::num_complex::Complex32;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
+use crate::runtime::Error;
 use crate::runtime::ItemTag;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
 use crate::runtime::Pmt;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
 use crate::runtime::Tag;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 use super::builder::BuilderType;
 
 /// Seify Sink block
+///
+/// # Ports
+///
+/// * Stream inputs:
+///     - `"in"` (if single channel): `Complex32` I/Q samples
+///     - `"in1"`, `"in2"`, ... (if multiple channels): `Complex32` I/Q samples
+/// * Stream outputs: None
+/// * Message inputs:
+///     - `"freq"`: `f32`, `f64`, `u32`, or `u64` (Hertz) set center tuning frequency, or `Null` to query
+///     - `"gain"`: `f32`, `f64`, `u32`, or `u64` (dB) set gain, or `Null` to query
+///     - `"sample_rate"`: `f32`, `f64`, `u32`, or `u64` (Hertz) sample rate frequency, or `Null` to query
+///     - `"cmd"`: `Pmt` encoded `Config` to apply to all channels at once
+///     - `"config"`: `u32`, `u64`, `usize` (channel id) returns the `Config` for the specified channel as a `Pmt::MapStrPmt`
+/// * Message outputs:
+///     - `"terminate_out"`: `Pmt::Ok` when stream has finished
 pub struct Sink<D: DeviceTrait + Clone> {
     channels: Vec<usize>,
     dev: Device<D>,
@@ -33,7 +49,11 @@ pub struct Sink<D: DeviceTrait + Clone> {
 }
 
 impl<D: DeviceTrait + Clone> Sink<D> {
-    pub(super) fn new(dev: Device<D>, channels: Vec<usize>, start_time: Option<i64>) -> Block {
+    pub(super) fn new(
+        dev: Device<D>,
+        channels: Vec<usize>,
+        start_time: Option<i64>,
+    ) -> TypedBlock<Self> {
         assert!(!channels.is_empty());
 
         let mut siob = StreamIoBuilder::new();
@@ -45,7 +65,7 @@ impl<D: DeviceTrait + Clone> Sink<D> {
                 siob = siob.add_input::<Complex32>(&format!("in{}", i + 1));
             }
         }
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("Sink").blocking().build(),
             siob.build(),
             MessageIoBuilder::new()
@@ -53,6 +73,7 @@ impl<D: DeviceTrait + Clone> Sink<D> {
                 .add_input("gain", Self::gain_handler)
                 .add_input("sample_rate", Self::sample_rate_handler)
                 .add_input("cmd", Self::cmd_handler)
+                .add_input("config", Self::get_config_handler)
                 .add_output("terminate_out")
                 .build(),
             Self {
@@ -135,6 +156,27 @@ impl<D: DeviceTrait + Clone> Sink<D> {
             };
         }
         Ok(Pmt::Ok)
+    }
+
+    #[message_handler]
+    fn get_config_handler(
+        &mut self,
+        _io: &mut WorkIo,
+        _mio: &mut MessageIo<Self>,
+        _meta: &mut BlockMeta,
+        channel: Pmt,
+    ) -> Result<Pmt> {
+        let id = match channel {
+            Pmt::Null | Pmt::Ok => 0,
+            Pmt::U32(id) => id as usize,
+            Pmt::U64(id) => id as usize,
+            Pmt::Usize(id) => id,
+            _ => return Ok(Pmt::InvalidValue),
+        };
+        if id >= self.channels.len() {
+            return Ok(Pmt::InvalidValue);
+        }
+        Ok(Config::from(&self.dev, Tx, id)?.to_serializable_pmt())
     }
 }
 
@@ -230,7 +272,7 @@ impl<D: DeviceTrait + Clone> Kernel for Sink<D> {
         self.streamer = Some(self.dev.tx_streamer(&self.channels)?);
         self.streamer
             .as_mut()
-            .context("no stream")?
+            .ok_or(Error::RuntimeError("Seify: no streamer".to_string()))?
             .activate_at(self.start_time)?;
 
         Ok(())
@@ -242,7 +284,10 @@ impl<D: DeviceTrait + Clone> Kernel for Sink<D> {
         _mio: &mut MessageIo<Self>,
         _meta: &mut BlockMeta,
     ) -> Result<()> {
-        self.streamer.as_mut().context("no stream")?.deactivate()?;
+        self.streamer
+            .as_mut()
+            .ok_or(Error::RuntimeError("Seify: no streamer".to_string()))?
+            .deactivate()?;
         Ok(())
     }
 }

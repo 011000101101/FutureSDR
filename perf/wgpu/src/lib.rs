@@ -1,12 +1,12 @@
-use std::iter::repeat_with;
-
-use futuresdr::anyhow::{Context, Result};
+use anyhow::Context;
+use anyhow::Result;
 use futuresdr::blocks::VectorSink;
 use futuresdr::blocks::VectorSource;
 use futuresdr::blocks::Wgpu;
 use futuresdr::runtime::buffer::wgpu;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
+use std::iter::repeat_with;
 
 #[cfg(not(target_arch = "wasm32"))]
 use futuresdr::runtime::scheduler::SmolScheduler;
@@ -23,9 +23,9 @@ pub async fn run(run: u64, scheduler: String, samples: u64, buffer_size: u64) ->
     let mul = Wgpu::new(broker, buffer_size / 4, 2, 2);
     let snk = VectorSink::<f32>::new(samples as usize);
 
-    let src = fg.add_block(src);
-    let mul = fg.add_block(mul);
-    let snk = fg.add_block(snk);
+    let src = fg.add_block(src)?;
+    let mul = fg.add_block(mul)?;
+    let snk = fg.add_block(snk)?;
 
     fg.connect_stream_with_type(src, "out", mul, "in", wgpu::H2D::new())?;
     fg.connect_stream_with_type(mul, "out", snk, "in", wgpu::D2H::new())?;

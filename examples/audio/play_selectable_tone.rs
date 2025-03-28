@@ -1,10 +1,11 @@
+use anyhow::Result;
 use clap::Parser;
-use futuresdr::anyhow::Result;
 use futuresdr::async_io;
 use futuresdr::blocks::audio::AudioSink;
 use futuresdr::blocks::Selector;
 use futuresdr::blocks::SelectorDropPolicy as DropPolicy;
 use futuresdr::blocks::SignalSourceBuilder;
+use futuresdr::runtime::BlockT;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
@@ -35,10 +36,10 @@ fn main() -> Result<()> {
         .expect("No input_index port found!");
     let snk = AudioSink::new(48_000, 1);
 
-    let src0 = fg.add_block(src0);
-    let src1 = fg.add_block(src1);
-    let selector = fg.add_block(selector);
-    let snk = fg.add_block(snk);
+    let src0 = fg.add_block(src0)?;
+    let src1 = fg.add_block(src1)?;
+    let selector = fg.add_block(selector)?;
+    let snk = fg.add_block(snk)?;
 
     fg.connect_stream(src0, "out", selector, "in0")?;
     fg.connect_stream(src1, "out", selector, "in1")?;

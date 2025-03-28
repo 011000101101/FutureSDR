@@ -1,12 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+use anyhow::Result;
 use eframe::egui;
 use eframe::egui::mutex::Mutex;
+use eframe::egui::widgets::SliderClamping;
 use eframe::egui_glow;
 use eframe::glow;
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::blocks::Fft;
 use futuresdr::blocks::FftDirection;
+use futuresdr::blocks::MovingAvg;
 use futuresdr::futures::channel::mpsc::channel;
 use futuresdr::futures::channel::mpsc::Receiver;
 use futuresdr::futures::channel::mpsc::Sender;
@@ -44,7 +46,7 @@ enum GuiAction {
 async fn process_gui_actions(
     mut rx: Receiver<GuiAction>,
     mut handle: FlowgraphHandle,
-) -> futuresdr::anyhow::Result<()> {
+) -> anyhow::Result<()> {
     while let Some(m) = rx.next().await {
         match m {
             GuiAction::SetFreq(f) => {
@@ -78,7 +80,7 @@ impl MyApp {
                 .build()?;
             let fft = Fft::with_options(FFT_SIZE, FftDirection::Forward, true, None);
             let mag_sqr = futuresdr_egui::power_block();
-            let keep = futuresdr_egui::Keep1InN::<FFT_SIZE>::new(0.1, 3);
+            let keep = MovingAvg::<FFT_SIZE>::new(0.1, 3);
             let snk = ChannelSink::new(tx_samples);
 
             connect!(fg, src > fft > mag_sqr > keep > snk);
@@ -114,7 +116,7 @@ impl eframe::App for MyApp {
                 if columns[0]
                     .add(
                         egui::Slider::new(&mut self.freq, 80..=200)
-                            .clamp_to_range(false)
+                            .clamping(SliderClamping::Never)
                             .suffix("MHz")
                             .text("frequency"),
                     )
@@ -125,7 +127,7 @@ impl eframe::App for MyApp {
                 if columns[1]
                     .add(
                         egui::Slider::new(&mut self.min, -50.0..=0.0)
-                            .clamp_to_range(false)
+                            .clamping(SliderClamping::Never)
                             .suffix("dB")
                             .text("min"),
                     )
@@ -136,7 +138,7 @@ impl eframe::App for MyApp {
                 if columns[2]
                     .add(
                         egui::Slider::new(&mut self.max, -20.0..=50.0)
-                            .clamp_to_range(false)
+                            .clamping(SliderClamping::Never)
                             .suffix("dB")
                             .text("max"),
                     )
@@ -195,11 +197,11 @@ impl Spectrum {
 
             let (vertex_shader_source, fragment_shader_source) = (
                 r#"
-                attribute vec2 coordinates;
+                in vec2 coordinates;
                 uniform float u_nsamples;
                 uniform float u_min;
                 uniform float u_max;
-                varying float power;
+                out float power;
 
                 void main(void) {
                     float x = -1.0 + 2.0 * coordinates.x / u_nsamples;
@@ -210,7 +212,8 @@ impl Spectrum {
                 "#,
                 r#"
                 precision mediump float;
-                varying float power;
+                in float power;
+                out vec4 FragColor;
 
                 vec3 color_map(float t) {
                     const vec3 c0 = vec3(0.2777273272234177, 0.005407344544966578, 0.3340998053353061);
@@ -225,7 +228,7 @@ impl Spectrum {
                 }
 
                 void main(void) {
-                    gl_FragColor = vec4(color_map(clamp(power, 0.0, 1.0)), 0.9);
+                    FragColor = vec4(color_map(clamp(power, 0.0, 1.0)), 0.9);
                 }
 
 

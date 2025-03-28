@@ -1,10 +1,9 @@
-use std::time;
-
-use futuresdr::anyhow::Result;
+use anyhow::Result;
 use futuresdr::blocks::FileSink;
 use futuresdr::blocks::FileSource;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
+use std::time;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -16,8 +15,8 @@ fn main() -> Result<()> {
 
     let mut fg = Flowgraph::new();
 
-    let src = fg.add_block(FileSource::<u32>::new(&args[1], false));
-    let snk = fg.add_block(FileSink::<f32>::new(&args[2]));
+    let src = fg.add_block(FileSource::<u32>::new(&args[1], false))?;
+    let snk = fg.add_block(FileSink::<f32>::new(&args[2]))?;
 
     fg.connect_stream(src, "out", snk, "in")?;
 

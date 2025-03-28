@@ -1,7 +1,7 @@
 #![allow(clippy::excessive_precision)]
+use anyhow::Result;
 use codec2::Codec2;
 use codec2::Codec2Mode;
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::audio::AudioSink;
 use futuresdr::blocks::Apply;
 use futuresdr::blocks::ApplyNM;
@@ -122,9 +122,10 @@ fn main() -> Result<()> {
     let mut c2 = Codec2::new(Codec2Mode::MODE_3200);
     assert_eq!(c2.samples_per_frame(), 160);
     assert_eq!(c2.bits_per_frame(), 64);
-    let codec = ApplyNM::<_, _, _, { (64 + 7) / 8 }, 160>::new(move |i: &[u8], o: &mut [i16]| {
-        c2.decode(o, i);
-    });
+    let codec =
+        ApplyNM::<_, _, _, { 64_usize.div_ceil(8) }, 160>::new(move |i: &[u8], o: &mut [i16]| {
+            c2.decode(o, i);
+        });
     let conv = Apply::new(|i: &i16| (*i as f32) / i16::MAX as f32);
     let upsample = FirBuilder::resampling::<f32, f32>(6, 1);
     let snk = AudioSink::new(48000, 1);

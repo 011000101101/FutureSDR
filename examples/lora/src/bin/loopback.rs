@@ -1,19 +1,23 @@
 use std::fmt::Debug;
 use std::time::Duration;
 
+use anyhow::anyhow;
+use anyhow::Result;
 use clap::Parser;
 
-use futuresdr::anyhow::{anyhow, Result};
 use futuresdr::async_io::Timer;
 use futuresdr::blocks::BlobToUdp;
 use futuresdr::macros::connect;
+use futuresdr::runtime::buffer::circular::Circular;
+use futuresdr::runtime::BlockT;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
 use futuresdr::tracing::info;
-use lora::utilities::Bandwidth;
-use lora::utilities::CodeRate;
-use lora::utilities::SpreadingFactor;
+use lora::default_values::ldro;
+use lora::utils::Bandwidth;
+use lora::utils::CodeRate;
+use lora::utils::SpreadingFactor;
 use lora::Decoder;
 use lora::Deinterleaver;
 use lora::FftDemod;
@@ -65,9 +69,9 @@ fn main() -> Result<()> {
     // TX
     // ==============================================================
     let transmitter = Transmitter::new(
-        args.code_rate.into(),
+        args.code_rate,
         HAS_CRC,
-        args.spreading_factor.into(),
+        args.spreading_factor,
         LOW_DATA_RATE,
         IMPLICIT_HEADER,
         args.oversampling,
@@ -94,9 +98,17 @@ fn main() -> Result<()> {
         false,
         None,
     );
-    let fft_demod = FftDemod::new(args.soft_decoding, args.spreading_factor.into());
+    let fft_demod = FftDemod::new(
+        args.soft_decoding,
+        args.spreading_factor.into(),
+        ldro(args.spreading_factor),
+    );
     let gray_mapping = GrayMapping::new(args.soft_decoding);
-    let deinterleaver = Deinterleaver::new(args.soft_decoding);
+    let deinterleaver = Deinterleaver::new(
+        args.soft_decoding,
+        ldro(args.spreading_factor),
+        args.spreading_factor,
+    );
     let hamming_dec = HammingDec::new(args.soft_decoding);
     let header_decoder = HeaderDecoder::new(HeaderMode::Explicit, false);
     let decoder = Decoder::new();

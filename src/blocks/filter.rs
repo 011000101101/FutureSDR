@@ -1,12 +1,12 @@
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Apply a function, returning an [Option] to allow filtering samples.
@@ -50,8 +50,8 @@ where
     B: 'static,
 {
     /// Create Filter block
-    pub fn new(f: impl FnMut(&A) -> Option<B> + Send + 'static) -> Block {
-        Block::new(
+    pub fn new(f: impl FnMut(&A) -> Option<B> + Send + 'static) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Filter").build(),
             StreamIoBuilder::new()
                 .add_input::<A>("in")

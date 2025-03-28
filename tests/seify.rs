@@ -1,16 +1,17 @@
-//! All tests are flagged as `#[ignore]`, `cargo test` should not be touching hardware
-//! by default.
-
+use anyhow::Context;
+use anyhow::Result;
 use float_cmp::assert_approx_eq;
-use futuresdr::{
-    anyhow::Result,
-    async_io::block_on,
-    blocks::{seify::*, Head, NullSink},
-    macros::connect,
-    num_complex::Complex,
-    runtime::{Flowgraph, Pmt, Runtime},
-    seify::Direction::*,
-};
+use futuresdr::async_io::block_on;
+use futuresdr::blocks::seify::*;
+use futuresdr::blocks::Head;
+use futuresdr::blocks::NullSink;
+use futuresdr::blocks::NullSource;
+use futuresdr::macros::connect;
+use futuresdr::num_complex::Complex;
+use futuresdr::runtime::Flowgraph;
+use futuresdr::runtime::Pmt;
+use futuresdr::runtime::Runtime;
+use futuresdr::seify::Direction::*;
 use std::collections::HashMap;
 
 /// Test backwards compatible builder style
@@ -19,11 +20,11 @@ use std::collections::HashMap;
 ///
 /// E.g. from examples/spectrum.
 #[test]
-#[ignore]
 fn builder_compat() -> Result<()> {
     futuresdr::runtime::init(); //For logging
     let mut fg = Flowgraph::new();
     let src = SourceBuilder::new()
+        .args("driver=dummy")?
         .frequency(100e6)
         .sample_rate(3.2e6)
         .gain(34.0)
@@ -41,11 +42,10 @@ fn builder_compat() -> Result<()> {
 
 /// Test basic builder style, w/ filter
 #[test]
-#[ignore]
 fn builder_compat_filter() -> Result<()> {
     let mut fg = Flowgraph::new();
     let src = SourceBuilder::new()
-        .args("soapy_driver=uhd")?
+        .args("driver=dummy")?
         .frequency(100e6)
         .sample_rate(3.2e6)
         .gain(34.0)
@@ -62,11 +62,10 @@ fn builder_compat_filter() -> Result<()> {
 }
 
 #[test]
-#[ignore]
 fn builder_config() -> Result<()> {
     let mut fg = Flowgraph::new();
 
-    let dev = seify::Device::from_args("soapy_driver=uhd")?;
+    let dev = seify::Device::from_args("driver=dummy")?;
     let src = SourceBuilder::new()
         .device(dev.clone())
         .channels(vec![0]) //testing, same as default
@@ -88,12 +87,11 @@ fn builder_config() -> Result<()> {
 
 /// Runtime configuration via the individual "freq" and "gain" ports
 #[test]
-#[ignore]
 fn config_freq_gain_ports() -> Result<()> {
     futuresdr::runtime::init();
     let mut fg = Flowgraph::new();
 
-    let dev = seify::Device::from_args("soapy_driver=uhd")?;
+    let dev = seify::Device::from_args("driver=dummy")?;
     let src = SourceBuilder::new()
         .device(dev.clone())
         .sample_rate(1e6)
@@ -124,13 +122,13 @@ fn config_freq_gain_ports() -> Result<()> {
     Ok(())
 }
 
-/// Runtime configuration via [`Pmt::MapStrPmt`] to "cmd" port
+/// Runtime configuration of [`Source`] via [`Pmt::MapStrPmt`] to `"cmd"` port
+/// and retrieval via `"config"` port
 #[test]
-#[ignore]
-fn config_cmd_map() -> Result<()> {
+fn src_config_cmd_map() -> Result<()> {
     let mut fg = Flowgraph::new();
 
-    let dev = seify::Device::from_args("driver=uhd")?;
+    let dev = seify::Device::from_args("driver=dummy")?;
 
     let src = SourceBuilder::new()
         .device(dev.clone())
@@ -138,6 +136,12 @@ fn config_cmd_map() -> Result<()> {
         .frequency(100e6)
         .gain(1.0)
         .build()?;
+    let cmd_port_id = src
+        .message_input_name_to_id("cmd")
+        .context("command port")?;
+    let cfg_port_id = src
+        .message_input_name_to_id("config")
+        .context("command port")?;
 
     let snk = NullSink::<Complex<f32>>::new();
 
@@ -150,13 +154,73 @@ fn config_cmd_map() -> Result<()> {
         let pmt = Pmt::MapStrPmt(HashMap::from([
             ("chan".to_owned(), Pmt::U32(0)),
             ("freq".to_owned(), Pmt::F64(102e6)),
-            ("gain".to_owned(), Pmt::F32(2.0)),
+            ("sample_rate".to_owned(), Pmt::F32(1e6)),
         ]));
-        fg_handle.callback(src, 3, pmt).await.unwrap();
+        fg_handle.callback(src, cmd_port_id, pmt).await.unwrap();
     });
 
     assert_approx_eq!(f64, dev.frequency(Rx, 0)?, 102e6, epsilon = 0.1);
-    assert_approx_eq!(f64, dev.gain(Rx, 0)?.unwrap(), 2.0);
+    assert_approx_eq!(f64, dev.sample_rate(Rx, 0)?, 1e6);
 
+    let conf = block_on(fg_handle.callback(src, cfg_port_id, Pmt::Ok))?;
+
+    match conf {
+        Pmt::MapStrPmt(m) => {
+            assert_eq!(m.get("freq").unwrap(), &Pmt::F64(102e6));
+            assert_eq!(m.get("sample_rate").unwrap(), &Pmt::F64(1e6));
+        }
+        o => panic!("unexpected pmt type {o:?}"),
+    }
+    Ok(())
+}
+
+/// Runtime configuration of [`Sink`] via [`Pmt::MapStrPmt`] to `"cmd"` port
+/// and retrieval via `"config"` port
+#[test]
+fn sink_config_cmd_map() -> Result<()> {
+    let mut fg = Flowgraph::new();
+
+    let dev = seify::Device::from_args("driver=dummy")?;
+
+    let snk = SinkBuilder::new()
+        .device(dev.clone())
+        .sample_rate(1e6)
+        .frequency(100e6)
+        .gain(1.0)
+        .build()?;
+    let cmd_port_id = snk
+        .message_input_name_to_id("cmd")
+        .context("command port")?;
+    let cfg_port_id = snk
+        .message_input_name_to_id("config")
+        .context("command port")?;
+
+    let src = NullSource::<Complex<f32>>::new();
+
+    connect!(fg, src > snk);
+
+    let rt = Runtime::new();
+    let (_, mut fg_handle) = rt.start_sync(fg);
+
+    block_on(async {
+        let pmt = Pmt::MapStrPmt(HashMap::from([
+            ("freq".to_owned(), Pmt::F64(102e6)),
+            ("sample_rate".to_owned(), Pmt::F32(1e6)),
+        ]));
+        fg_handle.callback(snk, cmd_port_id, pmt).await.unwrap();
+    });
+
+    assert_approx_eq!(f64, dev.frequency(Tx, 0)?, 102e6, epsilon = 0.1);
+    assert_approx_eq!(f64, dev.sample_rate(Tx, 0)?, 1e6);
+
+    let conf = block_on(fg_handle.callback(snk, cfg_port_id, Pmt::Ok))?;
+
+    match conf {
+        Pmt::MapStrPmt(m) => {
+            assert_eq!(m.get("freq").unwrap(), &Pmt::F64(102e6));
+            assert_eq!(m.get("sample_rate").unwrap(), &Pmt::F64(1e6));
+        }
+        o => panic!("unexpected pmt type {o:?}"),
+    }
     Ok(())
 }

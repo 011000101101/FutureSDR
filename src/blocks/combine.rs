@@ -1,12 +1,12 @@
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Apply a function to combine two streams into one.
@@ -24,13 +24,10 @@ use crate::runtime::WorkIo;
 /// # Usage
 /// ```
 /// use futuresdr::blocks::Combine;
-/// use futuresdr::runtime::Flowgraph;
 ///
-/// let mut fg = Flowgraph::new();
-///
-/// let adder = fg.add_block(Combine::new(|a: &f32, b: &f32| {
+/// let adder = Combine::new(|a: &f32, b: &f32| {
 ///     a + b
-/// }));
+/// });
 /// ```
 #[allow(clippy::type_complexity)]
 pub struct Combine<F, A, B, C>
@@ -57,8 +54,8 @@ where
     ///
     /// ## Parameter
     /// - `f`: Function `(&A, &B) -> C` used to combine samples
-    pub fn new(f: F) -> Block {
-        Block::new(
+    pub fn new(f: F) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Combine").build(),
             StreamIoBuilder::new()
                 .add_input::<A>("in0")

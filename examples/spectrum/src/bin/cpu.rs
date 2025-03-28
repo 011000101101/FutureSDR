@@ -1,7 +1,8 @@
-use futuresdr::anyhow::Result;
+use anyhow::Result;
 use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::blocks::Fft;
 use futuresdr::blocks::FftDirection;
+use futuresdr::blocks::MovingAvg;
 use futuresdr::blocks::WebsocketSinkBuilder;
 use futuresdr::blocks::WebsocketSinkMode;
 use futuresdr::macros::connect;
@@ -20,7 +21,7 @@ fn main() -> Result<()> {
         .build()?;
     let fft = Fft::with_options(FFT_SIZE, FftDirection::Forward, true, None);
     let mag_sqr = spectrum::power_block();
-    let keep = spectrum::Keep1InN::<FFT_SIZE>::new(0.1, 3);
+    let keep = MovingAvg::<FFT_SIZE>::new(0.1, 3);
     let snk = WebsocketSinkBuilder::<f32>::new(9001)
         .mode(WebsocketSinkMode::FixedBlocking(FFT_SIZE))
         .build();

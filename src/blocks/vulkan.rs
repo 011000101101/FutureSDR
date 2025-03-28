@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::sync::Arc;
 use vulkano::buffer::Buffer;
 use vulkano::buffer::BufferCreateInfo;
@@ -19,22 +20,23 @@ use vulkano::pipeline::Pipeline;
 use vulkano::pipeline::PipelineBindPoint;
 use vulkano::pipeline::PipelineLayout;
 use vulkano::pipeline::PipelineShaderStageCreateInfo;
-use vulkano::sync::{self, GpuFuture};
+use vulkano::sync::GpuFuture;
+use vulkano::sync::{self};
 
-use crate::anyhow::{Context, Result};
 use crate::runtime::buffer::vulkan::Broker;
 use crate::runtime::buffer::vulkan::BufferEmpty;
 use crate::runtime::buffer::vulkan::ReaderH2D;
 use crate::runtime::buffer::vulkan::WriterD2H;
 use crate::runtime::buffer::BufferReaderCustom;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 #[allow(clippy::needless_question_mark)]
@@ -71,7 +73,7 @@ pub struct Vulkan {
 
 impl Vulkan {
     /// Create Vulkan block
-    pub fn new(broker: Arc<Broker>, capacity: u64) -> Block {
+    pub fn new(broker: Arc<Broker>, capacity: u64) -> TypedBlock<Self> {
         let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(broker.device()));
         let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
             broker.device(),
@@ -80,7 +82,7 @@ impl Vulkan {
         let command_buffer_allocator =
             StandardCommandBufferAllocator::new(broker.device(), Default::default());
 
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("Vulkan").build(),
             StreamIoBuilder::new()
                 .add_input::<f32>("in")
@@ -249,7 +251,7 @@ impl VulkanBuilder {
         self
     }
     /// Build Vulkan block
-    pub fn build(self) -> Block {
+    pub fn build(self) -> TypedBlock<Vulkan> {
         Vulkan::new(self.broker, self.capacity)
     }
 }

@@ -1,4 +1,4 @@
-use futuresdr::anyhow::Result;
+use anyhow::Result;
 use futuresdr::blocks::MessageSourceBuilder;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
@@ -30,7 +30,7 @@ fn main() -> Result<()> {
     let msg_source = MessageSourceBuilder::new(Pmt::Null, time::Duration::from_millis(100))
         .n_messages(20)
         .build();
-    fg.add_block(msg_source);
+    fg.add_block(msg_source)?;
 
     let now = time::Instant::now();
     info!("starting flowgraph");

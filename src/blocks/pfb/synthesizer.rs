@@ -4,21 +4,23 @@ use rustfft::Fft;
 use rustfft::FftDirection;
 use rustfft::FftPlanner;
 
-use futuredsp::{Filter, FirFilter};
+use futuredsp::Filter;
+use futuredsp::FirFilter;
 
-use crate::anyhow::Result;
-use crate::blocks::pfb::channelizer::partition_filter_taps;
-use crate::blocks::pfb::channelizer::WindowBuffer;
 use crate::num_complex::Complex32;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
+
+use super::utilities::partition_filter_taps;
+use super::window_buffer::WindowBuffer;
 
 /// Polyphase Synthesizer.
 pub struct PfbSynthesizer {
@@ -32,9 +34,9 @@ pub struct PfbSynthesizer {
 
 impl PfbSynthesizer {
     /// Create Polyphase Synthesizer.
-    pub fn new(num_channels: usize, taps: &[f32]) -> Block {
+    pub fn new(num_channels: usize, taps: &[f32]) -> TypedBlock<Self> {
         let (partitioned_filters, filter_length) = partition_filter_taps(taps, num_channels);
-        let channelizer = PfbSynthesizer {
+        let synthesizer = PfbSynthesizer {
             num_channels,
             ifft: FftPlanner::new().plan_fft(num_channels, FftDirection::Inverse),
             fft_buf: vec![Complex32::default(); num_channels],
@@ -49,11 +51,11 @@ impl PfbSynthesizer {
         }
         sio = sio.add_output::<Complex32>("out");
 
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("PfbSynthesizer").build(),
             sio.build(),
             MessageIoBuilder::new().build(),
-            channelizer,
+            synthesizer,
         )
     }
 }
@@ -114,8 +116,16 @@ impl Kernel for PfbSynthesizer {
         }
         // each iteration either depletes the available input items or the available space in the out buffer, therefore no manual call_again necessary
         // appropriately propagate flowgraph termination
-        if n_items_to_consume - consumed_per_channel == 0
-            && sio.inputs().iter().any(|x| x.finished())
+        let samples_remaining_per_input: Vec<bool> = sio
+            .inputs_mut()
+            .iter_mut()
+            .map(|x| x.slice::<Complex32>())
+            .map(|x| x.len() - consumed_per_channel == 0)
+            .collect();
+        if samples_remaining_per_input
+            .iter()
+            .zip(sio.inputs().iter().map(|x| x.finished()))
+            .any(|(&out_of_samples, finished)| out_of_samples && finished)
         {
             io.finished = true;
         }

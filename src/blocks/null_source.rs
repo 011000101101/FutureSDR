@@ -1,13 +1,14 @@
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
+use futuresdr_types::Pmt;
 
 /// Generate a stream of zeroes.
 ///
@@ -35,15 +36,35 @@ pub struct NullSource<T: Send + 'static> {
 
 impl<T: Send + 'static> NullSource<T> {
     /// Create Null Source block
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("NullSource").build(),
             StreamIoBuilder::new().add_output::<T>("out").build(),
-            MessageIoBuilder::new().build(),
+            MessageIoBuilder::new()
+                .add_input("msg_in", Self::message_handler)
+                .build(),
             NullSource::<T> {
                 _type: std::marker::PhantomData,
             },
         )
+    }
+
+    #[message_handler]
+    fn message_handler(
+        &mut self,
+        io: &mut WorkIo,
+        _mio: &mut MessageIo<Self>,
+        _meta: &mut BlockMeta,
+        p: Pmt,
+    ) -> Result<Pmt> {
+        match p {
+            Pmt::Finished => io.finished = true,
+            _ => {
+                warn!("expected Pmt::finished, got {:?}", p);
+                return Ok(Pmt::InvalidValue);
+            }
+        }
+        Ok(Pmt::Null)
     }
 }
 

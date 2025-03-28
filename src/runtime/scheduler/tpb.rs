@@ -1,11 +1,14 @@
-use async_executor::{Executor, Task};
-use futures::channel::mpsc::{channel, Sender};
+use async_executor::Executor;
+use async_executor::Task;
+use futures::channel::mpsc::channel;
+use futures::channel::mpsc::Sender;
 use futures::channel::oneshot;
 use futures::future::Future;
 use once_cell::sync::Lazy;
 use slab::Slab;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 
 use crate::runtime::config;
@@ -40,8 +43,12 @@ impl fmt::Debug for TpbSchedulerInner {
 impl Drop for TpbSchedulerInner {
     fn drop(&mut self) {
         for i in self.workers.drain(..) {
-            i.1.send(()).unwrap();
-            i.0.join().unwrap();
+            if i.1.send(()).is_err() {
+                warn!("Worker task already terminated.");
+            }
+            if std::thread::current().id() != i.0.thread().id() && i.0.join().is_err() {
+                warn!("Worker thread already terminated.");
+            }
         }
     }
 }
@@ -60,7 +67,7 @@ impl TpbScheduler {
             .name("tpb-smol".to_string())
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    async_io::block_on(e.run(receiver)).unwrap();
+                    async_io::block_on(e.run(receiver))
                 }));
                 if result.is_err() {
                     eprintln!("tpb worker panicked {result:?}");

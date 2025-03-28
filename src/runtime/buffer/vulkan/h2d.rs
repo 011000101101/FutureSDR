@@ -1,5 +1,6 @@
 use std::any::Any;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use futures::channel::mpsc::Sender;
 use futures::prelude::*;
@@ -44,7 +45,7 @@ impl BufferBuilder for H2D {
     }
 
     fn get_size(&self) -> usize {
-        usize::MAX_VALUE // TODO how to get the size of the buffer when empty?
+        usize::MAX // TODO how to get the size of the buffer when empty?
     }
 }
 

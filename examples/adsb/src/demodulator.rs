@@ -1,16 +1,18 @@
-use crate::{N_SAMPLES_PER_HALF_SYM, SYMBOL_ONE_TAPS, SYMBOL_ZERO_TAPS};
-use futuresdr::anyhow::Result;
+use crate::N_SAMPLES_PER_HALF_SYM;
+use crate::SYMBOL_ONE_TAPS;
+use crate::SYMBOL_ZERO_TAPS;
 use futuresdr::macros::async_trait;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 
 #[derive(Clone, Debug)]
@@ -26,8 +28,8 @@ pub struct Demodulator {
 
 impl Demodulator {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Demodulator").build(),
             StreamIoBuilder::new().add_input::<f32>("in").build(),
             MessageIoBuilder::new().add_output("out").build(),

@@ -1,4 +1,4 @@
-use futuresdr::anyhow::Result;
+use anyhow::Result;
 use futuresdr::blocks::audio::AudioSink;
 use futuresdr::blocks::audio::FileSource;
 use futuresdr::blocks::ApplyNM;
@@ -13,22 +13,25 @@ fn main() -> Result<()> {
     let mut fg = Flowgraph::new();
 
     let src = FileSource::new("rick.mp3");
-    let inner = src.kernel::<FileSource>().unwrap();
 
     // resample to 48kHz
-    let resample = FirBuilder::resampling::<f32, f32>(48_000, inner.sample_rate() as usize);
+    let resample = FirBuilder::resampling::<f32, f32>(48_000, src.kernel.sample_rate() as usize);
 
-    assert_eq!(inner.channels(), 1, "We expect mp3 to be single channel.");
+    assert_eq!(
+        src.kernel.channels(),
+        1,
+        "We expect mp3 to be single channel."
+    );
     let mono_to_stereo = ApplyNM::<_, _, _, 1, 2>::new(move |v: &[f32], d: &mut [f32]| {
         d[0] = v[0] * GAIN_L;
         d[1] = v[0] * GAIN_R;
     });
     let snk = AudioSink::new(48_000, 2);
 
-    let src = fg.add_block(src);
-    let resample = fg.add_block(resample);
-    let mono_to_stereo = fg.add_block(mono_to_stereo);
-    let snk = fg.add_block(snk);
+    let src = fg.add_block(src)?;
+    let resample = fg.add_block(resample)?;
+    let mono_to_stereo = fg.add_block(mono_to_stereo)?;
+    let snk = fg.add_block(snk)?;
 
     fg.connect_stream(src, "out", resample, "in")?;
     fg.connect_stream(resample, "out", mono_to_stereo, "in")?;

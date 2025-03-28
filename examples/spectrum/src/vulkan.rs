@@ -1,3 +1,21 @@
+use anyhow::Context;
+use futuresdr::macros::async_trait;
+use futuresdr::runtime::buffer::vulkan::Broker;
+use futuresdr::runtime::buffer::vulkan::BufferEmpty;
+use futuresdr::runtime::buffer::vulkan::ReaderH2D;
+use futuresdr::runtime::buffer::vulkan::WriterD2H;
+use futuresdr::runtime::buffer::BufferReaderCustom;
+use futuresdr::runtime::BlockMeta;
+use futuresdr::runtime::BlockMetaBuilder;
+use futuresdr::runtime::Kernel;
+use futuresdr::runtime::MessageIo;
+use futuresdr::runtime::MessageIoBuilder;
+use futuresdr::runtime::Result;
+use futuresdr::runtime::StreamIo;
+use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::TypedBlock;
+use futuresdr::runtime::WorkIo;
+use futuresdr::tracing::debug;
 use std::sync::Arc;
 use vulkano::buffer::BufferUsage;
 use vulkano::buffer::CpuAccessibleBuffer;
@@ -12,25 +30,8 @@ use vulkano::memory::allocator::StandardMemoryAllocator;
 use vulkano::pipeline::ComputePipeline;
 use vulkano::pipeline::Pipeline;
 use vulkano::pipeline::PipelineBindPoint;
-use vulkano::sync::{self, GpuFuture};
-
-use futuresdr::anyhow::{Context, Result};
-use futuresdr::macros::async_trait;
-use futuresdr::runtime::buffer::vulkan::Broker;
-use futuresdr::runtime::buffer::vulkan::BufferEmpty;
-use futuresdr::runtime::buffer::vulkan::ReaderH2D;
-use futuresdr::runtime::buffer::vulkan::WriterD2H;
-use futuresdr::runtime::buffer::BufferReaderCustom;
-use futuresdr::runtime::Block;
-use futuresdr::runtime::BlockMeta;
-use futuresdr::runtime::BlockMetaBuilder;
-use futuresdr::runtime::Kernel;
-use futuresdr::runtime::MessageIo;
-use futuresdr::runtime::MessageIoBuilder;
-use futuresdr::runtime::StreamIo;
-use futuresdr::runtime::StreamIoBuilder;
-use futuresdr::runtime::WorkIo;
-use futuresdr::tracing::debug;
+use vulkano::sync::GpuFuture;
+use vulkano::sync::{self};
 
 #[allow(clippy::needless_question_mark)]
 #[allow(deprecated)]
@@ -65,13 +66,13 @@ pub struct Vulkan {
 }
 
 impl Vulkan {
-    pub fn new(broker: Arc<Broker>, capacity: u64) -> Block {
+    pub fn new(broker: Arc<Broker>, capacity: u64) -> TypedBlock<Self> {
         let memory_allocator = StandardMemoryAllocator::new_default(broker.device().clone());
         let descriptor_set_allocator = StandardDescriptorSetAllocator::new(broker.device().clone());
         let command_buffer_allocator =
             StandardCommandBufferAllocator::new(broker.device().clone(), Default::default());
 
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("Vulkan").build(),
             StreamIoBuilder::new()
                 .add_input::<f32>("in")

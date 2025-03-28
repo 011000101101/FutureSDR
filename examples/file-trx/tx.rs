@@ -1,10 +1,11 @@
+use anyhow::Result;
 use clap::Parser;
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::seify::SinkBuilder;
 use futuresdr::blocks::Apply;
 use futuresdr::blocks::FileSource;
 use futuresdr::macros::connect;
-use futuresdr::num_complex::{Complex, Complex32};
+use futuresdr::num_complex::Complex;
+use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
 

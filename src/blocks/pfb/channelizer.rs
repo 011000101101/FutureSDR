@@ -33,39 +33,20 @@ use rustfft::FftPlanner;
 use futuredsp::prelude::*;
 use futuredsp::FirFilter;
 
-use crate::anyhow::Result;
 use crate::num_complex::Complex32;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
-pub fn partition_filter_taps(
-    taps: &[f32],
-    n_filters: usize,
-) -> (Vec<FirFilter<Complex32, Complex32, Vec<f32>>>, usize) {
-    let mut fir_filters = vec![];
-    let taps_per_filter = (taps.len() as f32 / n_filters as f32).ceil() as usize;
-    for i in 0..n_filters {
-        let pad = taps_per_filter - ((taps.len() - i) as f32 / n_filters as f32).ceil() as usize;
-        let taps_tmp: Vec<f32> = taps
-            .iter()
-            .skip(i)
-            .step_by(n_filters)
-            .copied()
-            // .rev()
-            .chain(std::iter::repeat(0.0).take(pad))
-            .collect();
-        debug_assert_eq!(taps_tmp.len(), taps_per_filter);
-        fir_filters.push(FirFilter::<Complex32, Complex32, _>::new(taps_tmp));
-    }
-    (fir_filters, taps_per_filter)
-}
+use super::utilities::partition_filter_taps;
+use super::window_buffer::WindowBuffer;
 
 fn create_sio_builder(n_filters: usize) -> StreamIoBuilder {
     let mut sio = StreamIoBuilder::new().add_input::<Complex32>("in");
@@ -73,49 +54,6 @@ fn create_sio_builder(n_filters: usize) -> StreamIoBuilder {
         sio = sio.add_output::<Complex32>(format!("out{i}").as_str());
     }
     sio
-}
-
-#[derive(Clone, Debug)]
-pub struct WindowBuffer {
-    buffer_len: usize,
-    circular_buffer: Vec<Complex32>,
-    start_idx: usize,
-    num_samples_missing: usize,
-}
-
-impl WindowBuffer {
-    /// Create Circular Window Buffer
-    pub fn new(buffer_len: usize, pad_start: bool) -> WindowBuffer {
-        WindowBuffer {
-            buffer_len,
-            circular_buffer: vec![Complex32::default(); buffer_len * 2],
-            start_idx: 0,
-            num_samples_missing: if pad_start { 0 } else { buffer_len },
-        }
-    }
-
-    /// add a new sample at the end of the window, dropping the oldest one if the window is already filled
-    pub fn push(&mut self, sample: Complex32) {
-        self.circular_buffer[(self.start_idx as isize - self.num_samples_missing as isize)
-            .rem_euclid(self.buffer_len as isize) as usize] = sample;
-        self.circular_buffer[(self.start_idx as isize - self.num_samples_missing as isize)
-            .rem_euclid(self.buffer_len as isize) as usize
-            + self.buffer_len] = sample;
-        self.num_samples_missing = self.num_samples_missing.saturating_sub(1);
-        self.start_idx += 1;
-        self.start_idx %= self.buffer_len;
-    }
-
-    /// access the window as a contiguous slice
-    pub fn get_as_slice(&self) -> &[Complex32] {
-        debug_assert_eq!(self.num_samples_missing, 0);
-        &self.circular_buffer
-            [self.start_idx..self.start_idx + self.buffer_len - self.num_samples_missing]
-    }
-
-    pub fn filled(&self) -> bool {
-        self.num_samples_missing == 0
-    }
 }
 
 /// Polyphase Channelizer
@@ -132,7 +70,7 @@ pub struct PfbChannelizer {
 
 impl PfbChannelizer {
     /// Create Polyphase Channelizer.
-    pub fn new(num_channels: usize, taps: &[f32], oversample_rate: f32) -> Block {
+    pub fn new(num_channels: usize, taps: &[f32], oversample_rate: f32) -> TypedBlock<Self> {
         // validate input
         assert!(
             num_channels > 2,
@@ -163,7 +101,7 @@ impl PfbChannelizer {
 
         let sio = create_sio_builder(num_channels);
 
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("PfbChannelizer").build(),
             sio.build(),
             MessageIoBuilder::new().build(),
@@ -197,9 +135,9 @@ impl Kernel for PfbChannelizer {
             .iter_mut()
             .map(|x| x.slice::<Complex32>())
             .collect();
-        let n_items_producable = outs.iter().map(|x| x.len()).min().unwrap();
+        let n_items_producible = outs.iter().map(|x| x.len()).min().unwrap();
         let n_items_to_produce_per_channel = min(
-            n_items_producable,
+            n_items_producible,
             n_items_to_consume / self.decimation_factor,
         );
         // fill the sample windows if we do not yet have sufficient history to produce output
@@ -209,6 +147,9 @@ impl Kernel for PfbChannelizer {
             while !self.window_buf.iter().all(|w| w.filled()) {
                 if consumed == n_items_to_consume {
                     sio.input(0).consume(consumed);
+                    if sio.input(0).finished() {
+                        io.finished = true;
+                    }
                     return Ok(());
                 }
                 self.window_buf[self.base_index].push(input[consumed]);
@@ -219,6 +160,8 @@ impl Kernel for PfbChannelizer {
             self.all_windows_filled = true;
             if n_items_to_consume >= self.decimation_factor {
                 io.call_again = true;
+            } else if sio.input(0).finished() {
+                io.finished = true;
             }
             return Ok(());
         }
@@ -262,7 +205,6 @@ impl Kernel for PfbChannelizer {
             && sio.input(0).finished()
         {
             io.finished = true;
-            debug!("PfbChannelizer: Terminated.")
         }
         Ok(())
     }

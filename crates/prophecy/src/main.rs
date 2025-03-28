@@ -1,7 +1,8 @@
 #![allow(unused_imports)]
 use futuresdr::futures::StreamExt;
 use futuresdr::runtime::Pmt;
-use gloo_net::websocket::{futures::WebSocket, Message};
+use gloo_net::websocket::futures::WebSocket;
+use gloo_net::websocket::Message;
 use leptos::html::Input;
 use leptos::html::Span;
 use leptos::logging::*;
@@ -35,13 +36,7 @@ pub fn Flowgraph(fg_handle: FlowgraphHandle) -> impl IntoView {
         let fg_handle = fg_handle.clone();
         move |_| {
             let mut fg_handle = fg_handle.clone();
-            async move {
-                if let Ok(desc) = fg_handle.description().await {
-                    Some(desc)
-                } else {
-                    None
-                }
-            }
+            async move { fg_handle.description().await.ok() }
         }
     });
 
@@ -300,5 +295,5 @@ pub fn Prophecy() -> impl IntoView {
 
 pub fn main() {
     console_error_panic_hook::set_once();
-    mount_to_body(|| view! { <FlowgraphCanvas /> })
+    mount_to_body(|| view! { <Prophecy /> })
 }

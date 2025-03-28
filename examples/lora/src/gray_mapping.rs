@@ -1,28 +1,29 @@
-use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
+use futuresdr::runtime::ItemTag;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
-use futuresdr::runtime::{Block, ItemTag};
 use std::cmp::min;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
-use crate::utilities::*;
+use crate::utils::*;
 
 pub struct GrayMapping {
     m_soft_decoding: bool, // Hard/Soft decoding
 }
 
 impl GrayMapping {
-    pub fn new(soft_decoding: bool) -> Block {
+    pub fn new(soft_decoding: bool) -> TypedBlock<Self> {
         let mut sio = StreamIoBuilder::new();
         if soft_decoding {
             sio = sio.add_input::<[LLR; MAX_SF]>("in");
@@ -31,7 +32,7 @@ impl GrayMapping {
             sio = sio.add_input::<u16>("in");
             sio = sio.add_output::<u16>("out");
         }
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("GrayMapping").build(),
             sio.build(),
             MessageIoBuilder::new().build(),

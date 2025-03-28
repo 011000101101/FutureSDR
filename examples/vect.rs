@@ -1,13 +1,13 @@
-use std::iter::repeat_with;
-use std::time;
-
-use futuresdr::anyhow::{Context, Result};
+use anyhow::Context;
+use anyhow::Result;
 use futuresdr::blocks::Copy;
 use futuresdr::blocks::VectorSink;
 use futuresdr::blocks::VectorSinkBuilder;
 use futuresdr::blocks::VectorSource;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
+use std::iter::repeat_with;
+use std::time;
 
 fn main() -> Result<()> {
     let mut fg = Flowgraph::new();
@@ -17,16 +17,16 @@ fn main() -> Result<()> {
 
     let orig: Vec<f32> = repeat_with(rand::random::<f32>).take(n_items).collect();
 
-    let src = fg.add_block(VectorSource::new(orig.clone()));
+    let src = fg.add_block(VectorSource::new(orig.clone()))?;
     let snk = fg.add_block(
         VectorSinkBuilder::<f32>::new()
             .init_capacity(n_items)
             .build(),
-    );
+    )?;
 
     let mut prev = 0;
     for i in 0..n_copy {
-        let t = fg.add_block(Copy::<f32>::new());
+        let t = fg.add_block(Copy::<f32>::new())?;
 
         if i == 0 {
             fg.connect_stream(src, "out", t, "in")?;

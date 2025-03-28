@@ -1,23 +1,31 @@
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::time::SystemTime;
 
 use chrono::prelude::DateTime;
 use chrono::prelude::Utc;
-use semtech_udp::client_runtime::{Event, UdpRuntime};
-use semtech_udp::push_data::{Packet, RSig, RxPk, RxPkV2, CRC};
-use semtech_udp::{Bandwidth, CodingRate, DataRate, MacAddress, SpreadingFactor};
+use semtech_udp::client_runtime::Event;
+use semtech_udp::client_runtime::UdpRuntime;
+use semtech_udp::push_data::Packet;
+use semtech_udp::push_data::RSig;
+use semtech_udp::push_data::RxPk;
+use semtech_udp::push_data::RxPkV2;
+use semtech_udp::push_data::CRC;
+use semtech_udp::Bandwidth;
+use semtech_udp::CodingRate;
+use semtech_udp::DataRate;
+use semtech_udp::MacAddress;
+use semtech_udp::SpreadingFactor;
 use tokio::runtime::Runtime;
 use triggered::Trigger;
 
-use futuresdr::anyhow::Result;
 use futuresdr::futures::channel::mpsc;
 use futuresdr::futures::channel::mpsc::Sender;
 use futuresdr::futures::SinkExt;
 use futuresdr::futures_lite::StreamExt;
 use futuresdr::macros::async_trait;
 use futuresdr::macros::message_handler;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
@@ -25,7 +33,9 @@ use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
+use futuresdr::tracing::warn;
 
 /// Forward messages.
 pub struct PacketForwarderClient {
@@ -37,7 +47,7 @@ pub struct PacketForwarderClient {
 }
 
 impl PacketForwarderClient {
-    pub fn new(mac_addr: &str, server_addr: &str) -> Block {
+    pub fn new(mac_addr: &str, server_addr: &str) -> TypedBlock<Self> {
         let mac_address = MacAddress::from_str(mac_addr).unwrap();
         let (to_forwarder_sender, mut to_forwarder_receiver) = mpsc::channel::<Packet>(1);
         let host = SocketAddr::from_str(server_addr).unwrap();
@@ -87,8 +97,8 @@ impl PacketForwarderClient {
             });
         });
 
-        Block::new(
-            BlockMetaBuilder::new("MessageCopy").build(),
+        TypedBlock::new(
+            BlockMetaBuilder::new("PacketForwarder").build(),
             StreamIoBuilder::new().build(),
             MessageIoBuilder::new()
                 .add_input("in", Self::handler)
@@ -119,10 +129,17 @@ impl PacketForwarderClient {
                 if let Pmt::Blob(payload) = m.get("payload").unwrap() {
                     let codr: CodingRate = match m.get("code_rate").unwrap() {
                         Pmt::Usize(1) => CodingRate::_4_5,
-                        Pmt::U32(2) => CodingRate::_4_6,
-                        Pmt::U32(3) => CodingRate::_4_7,
-                        Pmt::U32(4) => CodingRate::_4_8,
-                        _ => panic!("invalid Coding Rate in received msg: {:?}", m.get("codr")),
+                        Pmt::Usize(2) => CodingRate::_4_6,
+                        Pmt::Usize(3) => CodingRate::_4_7,
+                        Pmt::Usize(4) => CodingRate::_4_8,
+                        _ => {
+                            warn!(
+                                "invalid Coding Rate in received msg: {:?}, {:?}",
+                                m.get("code_rate"),
+                                m
+                            );
+                            return Ok(Pmt::Ok);
+                        }
                     };
                     let sf: SpreadingFactor = match m.get("sf").unwrap() {
                         Pmt::U32(5) => SpreadingFactor::SF5,

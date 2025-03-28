@@ -1,13 +1,14 @@
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
+use rand::Rng;
 use std::marker::PhantomData;
 
 /// Copy input samples to the output, forwarding only a randomly selected number of samples.
@@ -29,8 +30,8 @@ impl<T: Copy + Send + 'static> CopyRand<T> {
     ///
     /// ## Parameter
     /// - `max_copy`: maximum number of samples to copy in one call of the `work()` function
-    pub fn new(max_copy: usize) -> Block {
-        Block::new(
+    pub fn new(max_copy: usize) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("CopyRand").build(),
             StreamIoBuilder::new()
                 .add_input::<T>("in")
@@ -60,7 +61,7 @@ impl<T: Copy + Send + 'static> Kernel for CopyRand<T> {
 
         let mut m = *[self.max_copy, i.len(), o.len()].iter().min().unwrap_or(&0);
         if m > 0 {
-            m = rand::random::<usize>() % m + 1;
+            m = rand::rng().random_range(..m + 1);
             o[..m].copy_from_slice(&i[..m]);
             sio.input(0).consume(m);
             sio.output(0).produce(m);
@@ -104,7 +105,7 @@ impl<T: Copy + Send + 'static> CopyRandBuilder<T> {
     }
 
     /// Build [`CopyRand`] block
-    pub fn build(self) -> Block {
+    pub fn build(self) -> TypedBlock<CopyRand<T>> {
         CopyRand::<T>::new(self.max_copy)
     }
 }

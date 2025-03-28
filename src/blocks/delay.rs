@@ -1,12 +1,12 @@
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 use futuresdr_types::Pmt;
 
@@ -44,14 +44,14 @@ pub struct Delay<T: Copy + Send + 'static> {
 
 impl<T: Copy + Send + 'static> Delay<T> {
     /// Creates a new Dealy block which will delay samples by the specified samples.
-    pub fn new(n: isize) -> Block {
+    pub fn new(n: isize) -> TypedBlock<Self> {
         let state = if n > 0 {
             State::Pad(n.try_into().unwrap())
         } else {
             State::Skip((-n).try_into().unwrap())
         };
 
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("Delay").build(),
             StreamIoBuilder::new()
                 .add_input::<T>("in")
@@ -147,8 +147,7 @@ impl<T: Copy + Send + 'static> Kernel for Delay<T> {
                 } else {
                     self.state = State::Skip(n - m);
                 }
-
-                if sio.input(0).finished() {
+                if sio.input(0).finished() && m == i.len() {
                     io.finished = true;
                 }
             }

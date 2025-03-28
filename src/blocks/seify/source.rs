@@ -1,3 +1,4 @@
+use anyhow::Context;
 use seify::Device;
 use seify::DeviceTrait;
 use seify::Direction::Rx;
@@ -5,23 +6,38 @@ use seify::GenericDevice;
 use seify::RxStreamer;
 use std::time::Duration;
 
-use crate::anyhow::{Context, Result};
 use crate::blocks::seify::builder::BuilderType;
 use crate::blocks::seify::Builder;
 use crate::blocks::seify::Config;
 use crate::num_complex::Complex32;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
 use crate::runtime::Pmt;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Seify Source block
+///
+/// # Ports
+///
+/// * Stream inputs: None
+/// * Stream outputs:
+///     - `"out"` (if single channel): `Complex32` I/Q samples
+///     - `"out1"`, `"out2"`, ... (if multiple channels): `Complex32` I/Q samples
+/// * Message inputs:
+///     - `"freq"`: `f32`, `f64`, `u32`, or `u64` (Hertz) center tuning frequency, or `Null` to query
+///     - `"gain"`: `f32`, `f64`, `u32`, or `u64` (dB) gain setting, or `Null` to query
+///     - `"sample_rate"`: `f32`, `f64`, `u32`, or `u64` (Hertz) sample rate frequency, or `Null` to query
+///     - `"cmd"`: `Pmt` encoded `Config` to apply to all channels at once
+///     - `"terminate"`: `Pmt::Ok` to terminate the block
+///     - `"config"`: `u32`, `u64`, `usize` (channel id) returns the `Config` for the specified channel as a `Pmt::MapStrPmt`
+/// * Message outputs: None
 pub struct Source<D: DeviceTrait + Clone> {
     channels: Vec<usize>,
     dev: Device<D>,
@@ -30,7 +46,11 @@ pub struct Source<D: DeviceTrait + Clone> {
 }
 
 impl<D: DeviceTrait + Clone> Source<D> {
-    pub(super) fn new(dev: Device<D>, channels: Vec<usize>, start_time: Option<i64>) -> Block {
+    pub(super) fn new(
+        dev: Device<D>,
+        channels: Vec<usize>,
+        start_time: Option<i64>,
+    ) -> TypedBlock<Self> {
         assert!(!channels.is_empty());
 
         let mut siob = StreamIoBuilder::new();
@@ -43,7 +63,7 @@ impl<D: DeviceTrait + Clone> Source<D> {
             }
         }
 
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("Source").blocking().build(),
             siob.build(),
             MessageIoBuilder::new()
@@ -52,6 +72,7 @@ impl<D: DeviceTrait + Clone> Source<D> {
                 .add_input("sample_rate", Self::sample_rate_handler)
                 .add_input("cmd", Self::cmd_handler)
                 .add_input("terminate", Self::terminate_handler)
+                .add_input("config", Self::get_config_handler)
                 .build(),
             Source {
                 channels,
@@ -155,6 +176,27 @@ impl<D: DeviceTrait + Clone> Source<D> {
             };
         }
         Ok(Pmt::Ok)
+    }
+
+    #[message_handler]
+    fn get_config_handler(
+        &mut self,
+        _io: &mut WorkIo,
+        _mio: &mut MessageIo<Self>,
+        _meta: &mut BlockMeta,
+        channel: Pmt,
+    ) -> Result<Pmt> {
+        let id = match channel {
+            Pmt::Null | Pmt::Ok => 0,
+            Pmt::U32(id) => id as usize,
+            Pmt::U64(id) => id as usize,
+            Pmt::Usize(id) => id,
+            _ => return Ok(Pmt::InvalidValue),
+        };
+        if id >= self.channels.len() {
+            return Ok(Pmt::InvalidValue);
+        }
+        Ok(Config::from(&self.dev, Rx, id)?.to_serializable_pmt())
     }
 }
 

@@ -1,9 +1,4 @@
-use std::cmp::min;
-use std::collections::HashMap;
-
-use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::ItemTag;
@@ -11,11 +6,16 @@ use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
-use futuresdr::tracing::{debug, info};
+use futuresdr::tracing::debug;
+use futuresdr::tracing::info;
+use std::cmp::min;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Frame {
@@ -57,8 +57,8 @@ pub struct HeaderDecoder {
 }
 
 impl HeaderDecoder {
-    pub fn new(mode: HeaderMode, ldro_mode: bool) -> Block {
-        Block::new(
+    pub fn new(mode: HeaderMode, ldro_mode: bool) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("HeaderDecoder").build(),
             StreamIoBuilder::new().add_input::<u8>("in").build(),
             MessageIoBuilder::new()
@@ -243,7 +243,7 @@ impl Kernel for HeaderDecoder {
                     - ((c4 << 4) + (c3 << 3) + (c2 << 2) + (c1 << 1) + c0) as i16
                     != 0;
                 if head_err || payload_len == 0 {
-                    debug!("Header checksum invalid!");
+                    info!("Header checksum invalid!");
                     if head_err {
                         debug!("Header checksum invalid!");
                     }
@@ -251,6 +251,10 @@ impl Kernel for HeaderDecoder {
                         debug!("Frame can not be empty!");
                         debug!("item to process= {}", nitem_to_consume);
                     }
+                    head_err = true;
+                } else if code_rate > 3 {
+                    info!("Header invalid!");
+                    debug!("Code rate must be within [0, 3]!");
                     head_err = true;
                 } else {
                     debug!("Header checksum valid!");

@@ -1,22 +1,24 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use std::time::Duration;
-use std::time::Instant;
-
-use futuresdr::anyhow::Result;
+use anyhow::Result;
+use criterion::black_box;
+use criterion::criterion_group;
+use criterion::criterion_main;
+use criterion::Criterion;
 use futuresdr::blocks::Copy;
 use futuresdr::blocks::Head;
 use futuresdr::blocks::NullSource;
 use futuresdr::blocks::VectorSinkBuilder;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
+use std::time::Duration;
+use std::time::Instant;
 
 fn run_fg(n_samp: u64) -> Result<()> {
     let mut fg = Flowgraph::new();
 
-    let null_source = fg.add_block(NullSource::<f32>::new());
-    let head = fg.add_block(Head::<f32>::new(n_samp));
-    let copy = fg.add_block(Copy::<f32>::new());
-    let vect_sink = fg.add_block(VectorSinkBuilder::<f32>::new().build());
+    let null_source = fg.add_block(NullSource::<f32>::new())?;
+    let head = fg.add_block(Head::<f32>::new(n_samp))?;
+    let copy = fg.add_block(Copy::<f32>::new())?;
+    let vect_sink = fg.add_block(VectorSinkBuilder::<f32>::new().build())?;
 
     fg.connect_stream(null_source, "out", head, "in")?;
     fg.connect_stream(head, "out", copy, "in")?;
@@ -31,10 +33,10 @@ fn run_fg_timed(n_samp: u64, iters: u64) -> Result<Duration> {
     for _ in 0..iters {
         let mut fg = Flowgraph::new();
 
-        let null_source = fg.add_block(NullSource::<f32>::new());
-        let head = fg.add_block(Head::<f32>::new(n_samp));
-        let copy = fg.add_block(Copy::<f32>::new());
-        let vect_sink = fg.add_block(VectorSinkBuilder::<f32>::new().build());
+        let null_source = fg.add_block(NullSource::<f32>::new())?;
+        let head = fg.add_block(Head::<f32>::new(n_samp))?;
+        let copy = fg.add_block(Copy::<f32>::new())?;
+        let vect_sink = fg.add_block(VectorSinkBuilder::<f32>::new().build())?;
 
         fg.connect_stream(null_source, "out", head, "in")?;
         fg.connect_stream(head, "out", copy, "in")?;

@@ -8,6 +8,7 @@ use crate::blocks::seify::Sink;
 use crate::blocks::seify::Source;
 use crate::runtime::Block;
 use crate::runtime::Error;
+use crate::runtime::TypedBlock;
 
 pub enum BuilderType {
     Source,
@@ -109,17 +110,37 @@ impl<D: DeviceTrait + Clone> Builder<D> {
         self.start_time = Some(s);
         self
     }
+    /// Build Typed Seify Source
+    pub fn build_source(mut self) -> Result<TypedBlock<Source<D>>, Error> {
+        match (self.dev.take(), self.builder_type) {
+            (Some(dev), BuilderType::Source) => {
+                self.config.apply(&dev, &self.channels, Direction::Rx)?;
+                Ok(Source::new(dev, self.channels, self.start_time))
+            }
+            _ => Err(Error::InvalidParameter),
+        }
+    }
+    /// Builder Typed Seify Sink
+    pub fn build_sink(mut self) -> Result<TypedBlock<Sink<D>>, Error> {
+        match (self.dev.take(), self.builder_type) {
+            (Some(dev), BuilderType::Sink) => {
+                self.config.apply(&dev, &self.channels, Direction::Tx)?;
+                Ok(Sink::new(dev, self.channels, self.start_time))
+            }
+            _ => Err(Error::InvalidParameter),
+        }
+    }
     /// Builder Seify block
     pub fn build(mut self) -> Result<Block, Error> {
         match self.dev.take() {
             Some(dev) => match self.builder_type {
                 BuilderType::Sink => {
                     self.config.apply(&dev, &self.channels, Direction::Tx)?;
-                    Ok(Sink::new(dev, self.channels, self.start_time))
+                    Ok(Sink::new(dev, self.channels, self.start_time).into())
                 }
                 BuilderType::Source => {
                     self.config.apply(&dev, &self.channels, Direction::Rx)?;
-                    Ok(Source::new(dev, self.channels, self.start_time))
+                    Ok(Source::new(dev, self.channels, self.start_time).into())
                 }
             },
             None => {
@@ -127,11 +148,11 @@ impl<D: DeviceTrait + Clone> Builder<D> {
                 match self.builder_type {
                     BuilderType::Sink => {
                         self.config.apply(&dev, &self.channels, Direction::Tx)?;
-                        Ok(Sink::new(dev, self.channels, self.start_time))
+                        Ok(Sink::new(dev, self.channels, self.start_time).into())
                     }
                     BuilderType::Source => {
                         self.config.apply(&dev, &self.channels, Direction::Rx)?;
-                        Ok(Source::new(dev, self.channels, self.start_time))
+                        Ok(Source::new(dev, self.channels, self.start_time).into())
                     }
                 }
             }

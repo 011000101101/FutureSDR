@@ -1,8 +1,6 @@
+use anyhow::Result;
 use async_io::block_on;
 use async_io::Timer;
-use std::time::Duration;
-
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::MessageSourceBuilder;
 use futuresdr::runtime::scheduler::FlowScheduler;
 use futuresdr::runtime::scheduler::Scheduler;
@@ -11,13 +9,14 @@ use futuresdr::runtime::scheduler::TpbScheduler;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
+use std::time::Duration;
 
 fn create_fg() -> Flowgraph {
     let mut fg = Flowgraph::new();
     let src = MessageSourceBuilder::new(Pmt::U32(123), Duration::from_millis(100))
         .n_messages(20)
         .build();
-    fg.add_block(src);
+    fg.add_block(src).unwrap();
     fg
 }
 

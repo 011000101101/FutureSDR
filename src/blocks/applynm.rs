@@ -1,12 +1,12 @@
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Apply a function to each N input samples, producing M output samples.
@@ -59,8 +59,8 @@ where
     B: Send + 'static,
 {
     /// Create [`ApplyNM`] block
-    pub fn new(f: F) -> Block {
-        Block::new(
+    pub fn new(f: F) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new(format!("ApplyNM {N} {M}")).build(),
             StreamIoBuilder::new()
                 .add_input::<A>("in")

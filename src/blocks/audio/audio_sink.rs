@@ -1,4 +1,6 @@
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::DeviceTrait;
+use cpal::traits::HostTrait;
+use cpal::traits::StreamTrait;
 use cpal::BufferSize;
 use cpal::SampleRate;
 use cpal::Stream;
@@ -7,15 +9,15 @@ use futures::channel::mpsc;
 use futures::channel::oneshot;
 use futures::SinkExt;
 
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Audio Sink.
@@ -40,8 +42,8 @@ const STANDARD_RATES: [u32; 4] = [24000, 44100, 48000, 96000];
 impl AudioSink {
     /// Create AudioSink block
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(sample_rate: u32, channels: u16) -> Block {
-        Block::new(
+    pub fn new(sample_rate: u32, channels: u16) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("AudioSink").build(),
             StreamIoBuilder::new().add_input::<f32>("in").build(),
             MessageIoBuilder::new().build(),

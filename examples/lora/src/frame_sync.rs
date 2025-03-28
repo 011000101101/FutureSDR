@@ -2,29 +2,34 @@ use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
-use rustfft::{Fft, FftDirection, FftPlanner};
+use rustfft::Fft;
+use rustfft::FftDirection;
+use rustfft::FftPlanner;
 
-use futuresdr::anyhow::Result;
 use futuresdr::futures::channel::mpsc;
 use futuresdr::macros::async_trait;
 use futuresdr::macros::message_handler;
 use futuresdr::num_complex::Complex32;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
-use futuresdr::tracing::{debug, info, warn};
+use futuresdr::tracing::debug;
+use futuresdr::tracing::info;
+use futuresdr::tracing::warn;
 
-use crate::utilities::*;
+use crate::utils::*;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 enum DecoderState {
@@ -180,7 +185,7 @@ impl FrameSync {
         net_id_caching_policy: Option<&str>,
         collect_receive_statistics: bool,
         startup_timestamp: Option<SystemTime>,
-    ) -> Block {
+    ) -> TypedBlock<Self> {
         let net_id_caching_policy_tmp = match NetIdCachingPolicy::from_str(net_id_caching_policy.unwrap_or("header_crc_ok")) {
             Ok(tmp) => tmp,
             Err(_) => panic!("Supplied invalid value for parameter net_id_caching_policy. Possible values: 'none', 'seen', 'header_crc_ok', 'payload_crc_ok'"),
@@ -194,8 +199,10 @@ impl FrameSync {
         let mut known_valid_net_ids_reverse: [[bool; 256]; 256] = [[false; 256]; 256];
         for sync_word in initial_sync_words {
             let sync_word_tmp: Vec<usize> = expand_sync_word(sync_word);
-            known_valid_net_ids_reverse[sync_word_tmp[1]][sync_word_tmp[0]] = true;
-            known_valid_net_ids[sync_word_tmp[0]][sync_word_tmp[1]] = true;
+            if sync_word_tmp.len() == 2 {
+                known_valid_net_ids_reverse[sync_word_tmp[1]][sync_word_tmp[0]] = true;
+                known_valid_net_ids[sync_word_tmp[0]][sync_word_tmp[1]] = true;
+            }
         }
         let m_number_of_bins_tmp = 1_usize << sf;
         let m_samples_per_symbol_tmp = m_number_of_bins_tmp * os_factor;
@@ -203,7 +210,7 @@ impl FrameSync {
 
         let fft_detect = FftPlanner::new().plan_fft(m_number_of_bins_tmp, FftDirection::Forward);
 
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("FrameSync").build(),
             StreamIoBuilder::new()
                 .add_input_with_size::<Complex32>(
@@ -328,7 +335,7 @@ impl FrameSync {
         _mio: &'a mut MessageIo<Self>,
         _meta: &'a mut BlockMeta,
         _p: Pmt,
-    ) -> std::result::Result<Pmt> {
+    ) -> Result<Pmt> {
         io.call_again = true;
         Ok(Pmt::Null)
     }
@@ -788,7 +795,7 @@ impl FrameSync {
             }
             self.bin_idx = bin_idx_new_opt;
             let items_to_consume = if self.symbol_cnt == self.m_n_up_req {
-                info!(
+                debug!(
                     "..:: Frame Detected ({:.1}MHz, SF{})",
                     self.m_center_freq as f32 / 1.0e6,
                     self.m_sf
@@ -866,7 +873,9 @@ impl FrameSync {
                 (down_val as isize - self.m_number_of_bins as isize) / 2
             }
         } else {
-            panic!("self.down_val must not be None here.")
+            warn!("self.down_val must not be None here.");
+            self.reset(false);
+            return (self.m_samples_per_symbol as isize, 0);
         };
 
         let cfo_int_modulo = my_modulo(m_cfo_int, self.m_number_of_bins);
@@ -1051,7 +1060,7 @@ impl FrameSync {
         let net_id_off_raw = self.net_id[0] & 0x07;
         let net_id_off_raw_1 = self.net_id[1] & 0x07;
         if net_id_off_raw == 0x04 {
-            info!("FrameSync: bad sync: offset > 3");
+            debug!("FrameSync: bad sync: offset > 3");
             self.reset(true);
             return (0, 0);
         }
@@ -1079,7 +1088,7 @@ impl FrameSync {
         if net_id_off.unsigned_abs() as usize > MAX_UNKNOWN_NET_ID_OFFSET
             && !self.known_valid_net_ids[self.net_id[0] as usize][self.net_id[1] as usize]
         {
-            info!("FrameSync: bad sync: previously unknown NetID and offset > {MAX_UNKNOWN_NET_ID_OFFSET}");
+            debug!("FrameSync: bad sync: previously unknown NetID and offset > {MAX_UNKNOWN_NET_ID_OFFSET}");
             self.reset(true);
             return (0, 0);
         }
@@ -1103,7 +1112,7 @@ impl FrameSync {
                 .try_into()
                 .expect("net-id can't be greater than SF bits, with SF<=12.");
             if net_id_1_tmp & 0x07 != net_id_off_raw {
-                info!(
+                debug!(
                     "FrameSync: bad sync: different offset for recovered net_id[0] and net_id[1]"
                 );
                 self.reset(true);
@@ -1111,11 +1120,11 @@ impl FrameSync {
             } else if !self.known_valid_net_ids_reverse[self.net_id[0] as usize]
                 [(net_id_1_tmp & 0xF8) as usize]
             {
-                info!("FrameSync: bad sync: different offset for original net_id[0] and net_id[1] and no match for recovered net_id[0]");
+                debug!("FrameSync: bad sync: different offset for original net_id[0] and net_id[1] and no match for recovered net_id[0]");
                 self.reset(true);
                 return (items_to_consume, 0);
             } else {
-                info!("detected netid2 as netid1, recovering..");
+                debug!("detected netid2 as netid1, recovering..");
                 self.net_id[0] = net_id_1_tmp;
                 // info!("netid1: {}", self.net_id[0]);
                 // info!("netid2: {}", self.net_id[1]);
@@ -1159,8 +1168,10 @@ impl FrameSync {
         // net IDs syntactically correct and matching offset => frame detected, proceed with trying to decode the header
         self.m_received_head = false;
         // consume the quarter downchirp, and at the same time correct CFOint (already applied correction for NET_ID recovery was only in retrospect on a local buffer)
-        items_to_consume +=
-            self.m_samples_per_symbol as isize / 4 + self.m_os_factor as isize * m_cfo_int;
+        items_to_consume += self.m_samples_per_symbol as isize / 4
+            + self.m_os_factor as isize * m_cfo_int
+            - self.m_os_factor as isize // TODO con
+        ;
         assert!(
             items_to_consume <= nitems_to_process as isize,
             "must not happen, we already altered persistent state."

@@ -1,9 +1,5 @@
+use anyhow::Result;
 use clap::Parser;
-use std::iter::repeat_with;
-use std::sync::Arc;
-use std::time;
-
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::VectorSink;
 use futuresdr::blocks::VectorSource;
 use futuresdr::blocks::VulkanBuilder;
@@ -12,6 +8,9 @@ use futuresdr::runtime::buffer::vulkan::Broker;
 use futuresdr::runtime::scheduler::SmolScheduler;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
+use std::iter::repeat_with;
+use std::sync::Arc;
+use std::time;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -34,9 +33,9 @@ fn main() -> Result<()> {
     let broker = Arc::new(Broker::new());
     let mut fg = Flowgraph::new();
 
-    let src = fg.add_block(VectorSource::<f32>::new(orig.clone()));
-    let vulkan = fg.add_block(VulkanBuilder::new(broker).capacity(buffer_size).build());
-    let snk = fg.add_block(VectorSink::<f32>::new(samples));
+    let src = fg.add_block(VectorSource::<f32>::new(orig.clone()))?;
+    let vulkan = fg.add_block(VulkanBuilder::new(broker).capacity(buffer_size).build())?;
+    let snk = fg.add_block(VectorSink::<f32>::new(samples))?;
 
     fg.connect_stream_with_type(src, "out", vulkan, "in", vulkan::H2D::new())?;
     fg.connect_stream_with_type(vulkan, "out", snk, "in", vulkan::D2H::new())?;

@@ -1,4 +1,3 @@
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::Copy;
 use futuresdr::blocks::MessageCopy;
 use futuresdr::blocks::MessageSink;
@@ -8,7 +7,6 @@ use futuresdr::blocks::VectorSource;
 use futuresdr::macros::async_trait;
 use futuresdr::macros::connect;
 use futuresdr::macros::message_handler;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Flowgraph;
@@ -16,12 +14,14 @@ use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::Runtime;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     let mut fg = Flowgraph::new();
 
     let src = VectorSource::new(vec![0u32, 1, 2, 3]);
@@ -75,8 +75,8 @@ pub struct Dummy;
 
 impl Dummy {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Dummy").build(),
             StreamIoBuilder::new().build(),
             MessageIoBuilder::new().build(),
@@ -103,8 +103,8 @@ pub struct Strange;
 
 impl Strange {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Strange").build(),
             StreamIoBuilder::new().add_output::<u8>("foo bar").build(),
             MessageIoBuilder::new().build(),
@@ -131,8 +131,8 @@ pub struct Handler;
 
 impl Handler {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Handler").build(),
             StreamIoBuilder::new().build(),
             MessageIoBuilder::new()

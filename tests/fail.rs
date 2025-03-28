@@ -1,7 +1,7 @@
-use futuresdr::anyhow::{bail, Result};
+use anyhow::bail;
+use anyhow::Result;
 use futuresdr::blocks::MessageSink;
 use futuresdr::macros::async_trait;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Flowgraph;
@@ -11,14 +11,15 @@ use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Runtime;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 
 struct FailInit;
 
 impl FailInit {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("FailInit").build(),
             StreamIoBuilder::new().build(),
             MessageIoBuilder::new().build(),
@@ -43,8 +44,8 @@ struct FailWork;
 
 impl FailWork {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("FailWork").build(),
             StreamIoBuilder::new().build(),
             MessageIoBuilder::new().build(),
@@ -70,8 +71,8 @@ struct FailDeinit;
 
 impl FailDeinit {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("FailDeinit").build(),
             StreamIoBuilder::new().build(),
             MessageIoBuilder::new().build(),
@@ -107,8 +108,8 @@ impl Kernel for FailDeinit {
 fn fail_init() -> Result<()> {
     let mut fg = Flowgraph::new();
 
-    fg.add_block(MessageSink::new());
-    fg.add_block(FailInit::new());
+    fg.add_block(MessageSink::new())?;
+    fg.add_block(FailInit::new())?;
 
     if Runtime::new().run(fg).is_ok() {
         panic!("flowgraph should fail")
@@ -121,8 +122,8 @@ fn fail_init() -> Result<()> {
 fn fail_work() -> Result<()> {
     let mut fg = Flowgraph::new();
 
-    fg.add_block(MessageSink::new());
-    fg.add_block(FailWork::new());
+    fg.add_block(MessageSink::new())?;
+    fg.add_block(FailWork::new())?;
 
     if Runtime::new().run(fg).is_ok() {
         panic!("flowgraph should fail")
@@ -135,8 +136,8 @@ fn fail_work() -> Result<()> {
 fn fail_deinit() -> Result<()> {
     let mut fg = Flowgraph::new();
 
-    fg.add_block(MessageSink::new());
-    fg.add_block(FailDeinit::new());
+    fg.add_block(MessageSink::new())?;
+    fg.add_block(FailDeinit::new())?;
 
     if Runtime::new().run(fg).is_ok() {
         panic!("flowgraph should fail")

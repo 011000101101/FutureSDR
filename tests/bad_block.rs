@@ -1,12 +1,24 @@
-use futuresdr::anyhow::{bail, Result};
+use anyhow::bail;
+use anyhow::Result;
 use futuresdr::async_io::block_on;
-use futuresdr::blocks::{Head, NullSink, NullSource, Throttle};
+use futuresdr::blocks::Head;
+use futuresdr::blocks::NullSink;
+use futuresdr::blocks::NullSource;
+use futuresdr::blocks::Throttle;
 use futuresdr::macros::async_trait;
 use futuresdr::macros::connect;
-use futuresdr::runtime::{
-    Block, BlockMeta, BlockMetaBuilder, Error, Flowgraph, Kernel, MessageIo, MessageIoBuilder,
-    Runtime, StreamIo, StreamIoBuilder, WorkIo,
-};
+use futuresdr::runtime::BlockMeta;
+use futuresdr::runtime::BlockMetaBuilder;
+use futuresdr::runtime::Error;
+use futuresdr::runtime::Flowgraph;
+use futuresdr::runtime::Kernel;
+use futuresdr::runtime::MessageIo;
+use futuresdr::runtime::MessageIoBuilder;
+use futuresdr::runtime::Runtime;
+use futuresdr::runtime::StreamIo;
+use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::TypedBlock;
+use futuresdr::runtime::WorkIo;
 use futuresdr::tracing::debug;
 use std::cmp;
 use std::marker::PhantomData;
@@ -25,8 +37,8 @@ pub struct BadBlock<T> {
 }
 
 impl<T: Copy + std::fmt::Debug + Send + Sync + 'static> BadBlock<T> {
-    pub fn to_block(self) -> Block {
-        Block::new(
+    pub fn to_block(self) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("BadBlock").build(),
             StreamIoBuilder::new()
                 .add_input::<T>("in")

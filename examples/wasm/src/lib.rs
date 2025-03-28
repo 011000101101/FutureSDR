@@ -1,6 +1,5 @@
-use std::iter::repeat_with;
-
-use futuresdr::anyhow::{Context, Result};
+use anyhow::Context;
+use anyhow::Result;
 use futuresdr::blocks::Apply;
 use futuresdr::blocks::VectorSink;
 use futuresdr::blocks::VectorSinkBuilder;
@@ -8,6 +7,7 @@ use futuresdr::blocks::VectorSource;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
 use futuresdr::tracing::info;
+use std::iter::repeat_with;
 
 pub async fn run() -> Result<()> {
     let n_items = 100_000;
@@ -19,9 +19,9 @@ pub async fn run() -> Result<()> {
     let mul = Apply::new(|i: &f32| i * 12.0);
     let snk = VectorSinkBuilder::<f32>::new().build();
 
-    let src = fg.add_block(src);
-    let mul = fg.add_block(mul);
-    let snk = fg.add_block(snk);
+    let src = fg.add_block(src)?;
+    let mul = fg.add_block(mul)?;
+    let snk = fg.add_block(snk)?;
 
     fg.connect_stream(src, "out", mul, "in")?;
     fg.connect_stream(mul, "out", snk, "in")?;

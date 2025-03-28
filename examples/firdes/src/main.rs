@@ -1,13 +1,12 @@
+use futuredsp::firdes;
 use futuresdr::blocks::audio::AudioSink;
 use futuresdr::blocks::FirBuilder;
 use futuresdr::blocks::Source;
+use futuresdr::runtime::Block;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
 
-use futuredsp::firdes;
-use futuresdr::anyhow::Result;
-
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     let mut fg = Flowgraph::new();
 
     const SAMPLING_FREQ: u32 = 66_150;
@@ -41,17 +40,17 @@ fn main() -> Result<()> {
         firdes::kaiser::bandpass::<f32>(lower_cutoff, higher_cutoff, transition_bw, max_ripple);
     println!("Filter has {} taps", filter_taps.len());
 
-    let filter_block = match enable_filter {
-        true => FirBuilder::new::<f32, f32, _>(filter_taps),
-        _ => FirBuilder::new::<f32, f32, _>([1.0_f32]),
+    let filter_block: Block = match enable_filter {
+        true => FirBuilder::new::<f32, f32, _>(filter_taps).into(),
+        _ => FirBuilder::new::<f32, f32, _>([1.0_f32]).into(),
     };
 
     let snk = AudioSink::new(DOWNSAMPLED_FREQ, 1);
 
-    let src = fg.add_block(src);
-    let resamp_block = fg.add_block(resamp_block);
-    let filter_block = fg.add_block(filter_block);
-    let snk = fg.add_block(snk);
+    let src = fg.add_block(src)?;
+    let resamp_block = fg.add_block(resamp_block)?;
+    let filter_block = fg.add_block(filter_block)?;
+    let snk = fg.add_block(snk)?;
 
     fg.connect_stream(src, "out", resamp_block, "in")?;
     fg.connect_stream(resamp_block, "out", filter_block, "in")?;

@@ -4,17 +4,17 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::WorkerGlobalScope;
 
-use crate::anyhow::Result;
 use crate::num_complex::Complex32;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
 use crate::runtime::Pmt;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 const TRANSFER_SIZE: usize = 262144;
@@ -113,8 +113,8 @@ unsafe impl Send for HackRf {}
 
 impl HackRf {
     /// Create HackRf Source
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("HackRf").build(),
             StreamIoBuilder::new()
                 .add_output::<Complex32>("out")
@@ -296,7 +296,8 @@ impl HackRf {
             .device
             .as_ref()
             .unwrap()
-            .control_transfer_out_with_u8_array(&parameter, buf);
+            .control_transfer_out_with_u8_slice(&parameter, buf)
+            .unwrap();
 
         let _ = JsFuture::from(transfer)
             .await?

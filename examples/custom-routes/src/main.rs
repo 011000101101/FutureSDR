@@ -1,16 +1,16 @@
+use anyhow::Result;
 use axum::extract::State;
 use axum::response::Html;
 use axum::routing::get;
 use axum::Router;
-use std::sync::{Arc, Mutex};
-use std::time;
-
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::MessageSourceBuilder;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
 use futuresdr::runtime::RuntimeHandle;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time;
 
 #[derive(Clone)]
 struct WebState {
@@ -26,7 +26,7 @@ fn main() -> Result<()> {
             time::Duration::from_millis(100),
         )
         .build(),
-    );
+    )?;
 
     let state = WebState {
         rt: Arc::new(Mutex::new(None)),
@@ -71,7 +71,8 @@ async fn start_fg(State(ws): State<WebState>) {
         )
         .n_messages(50)
         .build(),
-    );
+    )
+    .unwrap();
     let rt_handle = ws.rt.lock().unwrap().as_ref().unwrap().clone();
     let mut fg_handle = rt_handle.start(fg).await.unwrap();
     dbg!(fg_handle.description().await.unwrap());

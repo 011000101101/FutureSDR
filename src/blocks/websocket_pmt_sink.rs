@@ -3,25 +3,29 @@ use async_tungstenite::tungstenite::Message;
 use async_tungstenite::WebSocketStream;
 use futures::future;
 use futures::future::Either;
-use futures::sink::{Sink, SinkExt};
+use futures::sink::Sink;
+use futures::sink::SinkExt;
 use futures::Stream;
 use std::collections::VecDeque;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::SocketAddr;
+use std::net::TcpListener;
+use std::net::TcpStream;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
 
-use crate::anyhow::Context as _;
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
+use crate::runtime::Error;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
 use crate::runtime::Pmt;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Push Samples from PMTs in a WebSocket.
@@ -34,8 +38,8 @@ pub struct WebsocketPmtSink {
 
 impl WebsocketPmtSink {
     /// Create WebsocketPmtSink block
-    pub fn new(port: u32) -> Block {
-        Block::new(
+    pub fn new(port: u32) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("WebsocketPmtSink").build(),
             StreamIoBuilder::new().build(),
             MessageIoBuilder::<Self>::new()
@@ -81,7 +85,7 @@ impl Kernel for WebsocketPmtSink {
         _meta: &mut BlockMeta,
     ) -> Result<()> {
         if let Some(ref mut conn) = self.conn {
-            match self.pmts.pop_front() {
+            let msg = match self.pmts.pop_front() {
                 Some(Pmt::VecCF32(v)) => {
                     let v: Vec<u8> = v
                         .into_iter()
@@ -93,39 +97,83 @@ impl Kernel for WebsocketPmtSink {
                         })
                         .collect();
                     if !v.is_empty() {
-                        let acc = Box::pin(self.listener.as_ref().context("no listener")?.accept());
-                        let send = conn.send(Message::Binary(v));
+                        Some(Message::Binary(v))
+                    } else {
+                        None
+                    }
+                }
+                Some(Pmt::VecF32(v)) => {
+                    let v: Vec<u8> = v
+                        .into_iter()
+                        .flat_map(|f| {
+                            let mut b = [0; 4];
+                            b.copy_from_slice(&f.to_le_bytes());
+                            b
+                        })
+                        .collect();
+                    if !v.is_empty() {
+                        Some(Message::Binary(v))
+                    } else {
+                        None
+                    }
+                }
+                Some(Pmt::VecU64(v)) => {
+                    let v: Vec<u8> = v
+                        .into_iter()
+                        .flat_map(|f| {
+                            let mut b = [0; 8];
+                            b.copy_from_slice(&f.to_le_bytes());
+                            b
+                        })
+                        .collect();
+                    if !v.is_empty() {
+                        Some(Message::Binary(v))
+                    } else {
+                        None
+                    }
+                }
+                Some(Pmt::Blob(b)) => Some(Message::Binary(b)),
+                Some(Pmt::String(s)) => Some(Message::Text(s)),
+                Some(p) => {
+                    warn!("WebsocketPmtSink: unsupported PMT type {:?}", p);
+                    None
+                }
+                None => None,
+            };
 
-                        match future::select(acc, send).await {
-                            Either::Left((a, _)) => {
-                                if let Ok((stream, _)) = a {
-                                    self.conn = Some(WsStream {
-                                        inner: async_tungstenite::accept_async(stream).await?,
-                                    });
-                                }
-                            }
-                            Either::Right((s, _)) => {
-                                if s.is_err() {
-                                    debug!("websocket: client disconnected");
-                                    self.conn = None;
-                                }
-                            }
+            if let Some(msg) = msg {
+                let acc = Box::pin(
+                    self.listener
+                        .as_ref()
+                        .ok_or_else(|| Error::RuntimeError("no listener".to_string()))?
+                        .accept(),
+                );
+                let send = conn.send(msg);
+
+                match future::select(acc, send).await {
+                    Either::Left((a, _)) => {
+                        if let Ok((stream, _)) = a {
+                            self.conn = Some(WsStream {
+                                inner: async_tungstenite::accept_async(stream).await?,
+                            });
                         }
-
-                        if !self.pmts.is_empty() {
-                            io.call_again = true;
+                    }
+                    Either::Right((s, _)) => {
+                        if s.is_err() {
+                            debug!("websocket: client disconnected");
+                            self.conn = None;
                         }
                     }
                 }
-                Some(p) => {
-                    warn!("WebsocketPmtSink: wrong PMT type {:?}", p);
-                }
-                _ => {}
+            }
+
+            if !self.pmts.is_empty() {
+                io.call_again = true;
             }
         } else if let Ok((stream, socket)) = self
             .listener
             .as_ref()
-            .context("no listener")?
+            .ok_or_else(|| Error::RuntimeError("no listener".to_string()))?
             .get_ref()
             .accept()
         {

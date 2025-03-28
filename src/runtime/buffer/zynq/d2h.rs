@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;
@@ -45,7 +46,7 @@ impl BufferBuilder for D2H {
     }
 
     fn get_size(&self) -> usize {
-        usize::MAX_VALUE // TODO how to get the size of the buffer when empty?
+        usize::MAX // TODO how to get the size of the buffer when empty?
     }
 }
 

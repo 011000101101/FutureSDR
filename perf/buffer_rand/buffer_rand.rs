@@ -1,7 +1,6 @@
+use anyhow::Context;
+use anyhow::Result;
 use clap::Parser;
-use std::time;
-
-use futuresdr::anyhow::{Context, Result};
 use futuresdr::blocks::CopyRandBuilder;
 use futuresdr::blocks::Head;
 use futuresdr::blocks::NullSink;
@@ -12,6 +11,7 @@ use futuresdr::runtime::scheduler::SmolScheduler;
 use futuresdr::runtime::Error;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
+use std::time;
 
 fn connect(
     fg: &mut Flowgraph,
@@ -20,7 +20,7 @@ fn connect(
     dst: usize,
     dst_port: &'static str,
     slab: bool,
-) -> std::result::Result<(), Error> {
+) -> Result<(), Error> {
     if slab {
         fg.connect_stream_with_type(src, src_port, dst, dst_port, Slab::new())
     } else {
@@ -61,20 +61,20 @@ fn main() -> Result<()> {
     let mut snks = Vec::new();
 
     for _ in 0..pipes {
-        let src = fg.add_block(NullSource::<f32>::new());
-        let head = fg.add_block(Head::<f32>::new(samples as u64));
+        let src = fg.add_block(NullSource::<f32>::new())?;
+        let head = fg.add_block(Head::<f32>::new(samples as u64))?;
         connect(&mut fg, src, "out", head, "in", slab)?;
 
-        let mut last = fg.add_block(CopyRandBuilder::<f32>::new().max_copy(max_copy).build());
+        let mut last = fg.add_block(CopyRandBuilder::<f32>::new().max_copy(max_copy).build())?;
         connect(&mut fg, head, "out", last, "in", slab)?;
 
         for _ in 1..stages {
-            let block = fg.add_block(CopyRandBuilder::<f32>::new().max_copy(max_copy).build());
+            let block = fg.add_block(CopyRandBuilder::<f32>::new().max_copy(max_copy).build())?;
             connect(&mut fg, last, "out", block, "in", slab)?;
             last = block;
         }
 
-        let snk = fg.add_block(NullSink::<f32>::new());
+        let snk = fg.add_block(NullSink::<f32>::new())?;
         connect(&mut fg, last, "out", snk, "in", slab)?;
         snks.push(snk);
     }

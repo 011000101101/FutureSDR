@@ -1,7 +1,4 @@
-use std::iter::repeat_with;
-use std::sync::Arc;
-
-use futuresdr::anyhow::Result;
+use anyhow::Result;
 use futuresdr::blocks::Copy;
 use futuresdr::blocks::VectorSink;
 use futuresdr::blocks::VectorSinkBuilder;
@@ -13,6 +10,8 @@ use futuresdr::runtime::buffer::vulkan::H2D;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
 use futuresdr::tracing::info;
+use std::iter::repeat_with;
+use std::sync::Arc;
 
 pub fn run_fg() -> Result<()> {
     let mut fg = Flowgraph::new();
@@ -26,10 +25,10 @@ pub fn run_fg() -> Result<()> {
     let vulkan = VulkanBuilder::new(broker).build();
     let snk = VectorSinkBuilder::<f32>::new().build();
 
-    let src = fg.add_block(src);
-    let copy = fg.add_block(copy);
-    let vulkan = fg.add_block(vulkan);
-    let snk = fg.add_block(snk);
+    let src = fg.add_block(src)?;
+    let copy = fg.add_block(copy)?;
+    let vulkan = fg.add_block(vulkan)?;
+    let snk = fg.add_block(snk)?;
 
     fg.connect_stream(src, "out", copy, "in")?;
     fg.connect_stream_with_type(copy, "out", vulkan, "in", H2D::new())?;
@@ -53,7 +52,8 @@ pub fn run_fg() -> Result<()> {
 #[cfg(target_os = "android")]
 mod android {
     use super::*;
-    use jni::objects::{JClass, JString};
+    use jni::objects::JClass;
+    use jni::objects::JString;
     use jni::JNIEnv;
 
     #[allow(non_snake_case)]

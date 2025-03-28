@@ -1,6 +1,7 @@
 use dyn_clone::DynClone;
 use num_complex::Complex32;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt;
@@ -14,6 +15,8 @@ pub trait PmtAny: Any + DynClone + Send + Sync + 'static {
     fn as_any(&self) -> &dyn Any;
     /// Cast to mutable [`Any`](std::any::Any)
     fn as_any_mut(&mut self) -> &mut dyn Any;
+    /// Consume `self`, converting to a `Box<dyn Any>`
+    fn to_any(self: Box<Self>) -> Box<dyn Any>;
 }
 dyn_clone::clone_trait_object!(PmtAny);
 
@@ -22,6 +25,9 @@ impl<T: Any + DynClone + Send + Sync + 'static> PmtAny for T {
         self
     }
     fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn to_any(self: Box<Self>) -> Box<dyn Any> {
         self
     }
 }
@@ -33,6 +39,12 @@ impl fmt::Debug for Box<dyn PmtAny> {
 }
 
 impl dyn PmtAny {
+    /// Determine if this `PmtAny` has the given concrete type.
+    ///
+    /// A value of `true` implies `downcast_ref`, `downcast_mut` and `take` will return `Some`.
+    pub fn is<T: PmtAny>(&self) -> bool {
+        self.as_any().is::<T>()
+    }
     /// Try to cast the [`Pmt::Any`] to the given type.
     pub fn downcast_ref<T: PmtAny>(&self) -> Option<&T> {
         (*self).as_any().downcast_ref::<T>()
@@ -40,6 +52,10 @@ impl dyn PmtAny {
     /// Try to cast the [`Pmt::Any`] to the given type mutably.
     pub fn downcast_mut<T: PmtAny>(&mut self) -> Option<&mut T> {
         (*self).as_any_mut().downcast_mut::<T>()
+    }
+    /// Consuming `self`, try to take ownership of the value as the given type.
+    pub fn take<T: PmtAny>(self: Box<Self>) -> Option<Box<T>> {
+        self.to_any().downcast::<T>().ok()
     }
 }
 
@@ -70,7 +86,7 @@ pub enum Pmt {
     Usize(usize),
     /// Isize
     Isize(isize),
-    /// U32, 32-bit unsiged integer
+    /// U32, 32-bit unsigned integer
     U32(u32),
     /// U64, 64-bit unsigned integer
     U64(u64),
@@ -100,6 +116,33 @@ pub enum Pmt {
     /// `downcast_ref/mut()` to extract.
     #[serde(skip)]
     Any(Box<dyn PmtAny>),
+}
+
+impl Pmt {
+    /// Get the PMT variant kind without associated data.
+    pub fn kind(&self) -> PmtKind {
+        match self {
+            Pmt::Ok => PmtKind::Ok,
+            Pmt::InvalidValue => PmtKind::InvalidValue,
+            Pmt::Null => PmtKind::Null,
+            Pmt::String(_) => PmtKind::String,
+            Pmt::Bool(_) => PmtKind::Bool,
+            Pmt::Usize(_) => PmtKind::Usize,
+            Pmt::Isize(_) => PmtKind::Isize,
+            Pmt::U32(_) => PmtKind::U32,
+            Pmt::U64(_) => PmtKind::U64,
+            Pmt::F32(_) => PmtKind::F32,
+            Pmt::F64(_) => PmtKind::F64,
+            Pmt::VecCF32(_) => PmtKind::VecCF32,
+            Pmt::VecF32(_) => PmtKind::VecF32,
+            Pmt::VecU64(_) => PmtKind::VecU64,
+            Pmt::Blob(_) => PmtKind::Blob,
+            Pmt::VecPmt(_) => PmtKind::VecPmt,
+            Pmt::Finished => PmtKind::Finished,
+            Pmt::MapStrPmt(_) => PmtKind::MapStrPmt,
+            Pmt::Any(_) => PmtKind::Any,
+        }
+    }
 }
 
 impl fmt::Display for Pmt {
@@ -144,6 +187,7 @@ impl PartialEq for Pmt {
             (Pmt::F64(x), Pmt::F64(y)) => x == y,
             (Pmt::VecF32(x), Pmt::VecF32(y)) => x == y,
             (Pmt::VecU64(x), Pmt::VecU64(y)) => x == y,
+            (Pmt::VecCF32(x), Pmt::VecCF32(y)) => x == y,
             (Pmt::Blob(x), Pmt::Blob(y)) => x == y,
             (Pmt::VecPmt(x), Pmt::VecPmt(y)) => x == y,
             (Pmt::Finished, Pmt::Finished) => true,
@@ -223,63 +267,213 @@ impl Pmt {
 ///
 /// This error is returned, if conversion to/from PMTs fail.
 #[derive(Debug, Clone, Error, PartialEq)]
-#[error("PMt conversion error")]
+#[error("PMT conversion error")]
 pub struct PmtConversionError;
 
-impl TryInto<f64> for Pmt {
+impl TryFrom<&Pmt> for f64 {
     type Error = PmtConversionError;
 
-    fn try_into(self) -> Result<f64, Self::Error> {
-        match self {
-            Pmt::F32(f) => Ok(f as f64),
-            Pmt::F64(f) => Ok(f),
-            Pmt::U32(f) => Ok(f as f64),
-            Pmt::U64(f) => Ok(f as f64),
+    fn try_from(value: &Pmt) -> Result<f64, Self::Error> {
+        match value {
+            Pmt::F32(f) => Ok(*f as f64),
+            Pmt::F64(f) => Ok(*f),
+            Pmt::U32(f) => Ok(*f as f64),
+            Pmt::U64(f) => Ok(*f as f64),
             _ => Err(PmtConversionError),
         }
     }
 }
 
-impl TryInto<usize> for Pmt {
+impl TryFrom<Pmt> for f64 {
     type Error = PmtConversionError;
 
-    fn try_into(self) -> Result<usize, Self::Error> {
-        match self {
-            Pmt::Usize(f) => Ok(f),
+    fn try_from(value: Pmt) -> Result<f64, Self::Error> {
+        (&value).try_into()
+    }
+}
+
+impl TryFrom<&Pmt> for usize {
+    type Error = PmtConversionError;
+
+    fn try_from(value: &Pmt) -> Result<usize, Self::Error> {
+        match value {
+            Pmt::Usize(f) => Ok(*f),
             _ => Err(PmtConversionError),
         }
     }
 }
 
-impl TryInto<isize> for Pmt {
+impl TryFrom<Pmt> for usize {
     type Error = PmtConversionError;
 
-    fn try_into(self) -> Result<isize, Self::Error> {
-        match self {
-            Pmt::Isize(f) => Ok(f),
+    fn try_from(value: Pmt) -> Result<usize, Self::Error> {
+        (&value).try_into()
+    }
+}
+
+impl TryFrom<&Pmt> for isize {
+    type Error = PmtConversionError;
+
+    fn try_from(value: &Pmt) -> Result<isize, Self::Error> {
+        match value {
+            Pmt::Isize(f) => Ok(*f),
             _ => Err(PmtConversionError),
         }
     }
 }
 
-impl TryInto<u64> for Pmt {
+impl TryFrom<Pmt> for isize {
     type Error = PmtConversionError;
 
-    fn try_into(self) -> Result<u64, Self::Error> {
-        match self {
-            Pmt::U32(v) => Ok(v as u64),
-            Pmt::U64(v) => Ok(v),
-            Pmt::Usize(v) => Ok(v as u64),
+    fn try_from(value: Pmt) -> Result<isize, Self::Error> {
+        (&value).try_into()
+    }
+}
+
+impl TryFrom<&Pmt> for u64 {
+    type Error = PmtConversionError;
+
+    fn try_from(value: &Pmt) -> Result<u64, Self::Error> {
+        match value {
+            Pmt::U32(v) => Ok(*v as u64),
+            Pmt::U64(v) => Ok(*v),
+            Pmt::Usize(v) => Ok(*v as u64),
             _ => Err(PmtConversionError),
         }
+    }
+}
+
+impl TryFrom<Pmt> for u64 {
+    type Error = PmtConversionError;
+
+    fn try_from(value: Pmt) -> Result<u64, Self::Error> {
+        (&value).try_into()
+    }
+}
+
+impl TryFrom<&Pmt> for bool {
+    type Error = PmtConversionError;
+
+    fn try_from(value: &Pmt) -> Result<bool, Self::Error> {
+        match value {
+            Pmt::Bool(b) => Ok(*b),
+            _ => Err(PmtConversionError),
+        }
+    }
+}
+
+impl TryFrom<Pmt> for bool {
+    type Error = PmtConversionError;
+
+    fn try_from(value: Pmt) -> Result<bool, Self::Error> {
+        (&value).try_into()
+    }
+}
+
+impl TryFrom<Pmt> for Vec<f32> {
+    type Error = PmtConversionError;
+
+    fn try_from(value: Pmt) -> Result<Vec<f32>, Self::Error> {
+        match value {
+            Pmt::VecF32(v) => Ok(v),
+            _ => Err(PmtConversionError),
+        }
+    }
+}
+
+impl TryFrom<Pmt> for Vec<Complex32> {
+    type Error = PmtConversionError;
+
+    fn try_from(value: Pmt) -> Result<Vec<Complex32>, Self::Error> {
+        match value {
+            Pmt::VecCF32(v) => Ok(v),
+            _ => Err(PmtConversionError),
+        }
+    }
+}
+
+impl TryFrom<Pmt> for Vec<u64> {
+    type Error = PmtConversionError;
+
+    fn try_from(value: Pmt) -> Result<Vec<u64>, Self::Error> {
+        match value {
+            Pmt::VecU64(v) => Ok(v),
+            _ => Err(PmtConversionError),
+        }
+    }
+}
+
+impl From<()> for Pmt {
+    fn from(_: ()) -> Self {
+        Pmt::Null
+    }
+}
+
+impl From<bool> for Pmt {
+    fn from(b: bool) -> Self {
+        Pmt::Bool(b)
+    }
+}
+
+impl From<f32> for Pmt {
+    fn from(f: f32) -> Self {
+        Pmt::F32(f)
+    }
+}
+
+impl From<f64> for Pmt {
+    fn from(f: f64) -> Self {
+        Pmt::F64(f)
+    }
+}
+
+impl From<u32> for Pmt {
+    fn from(f: u32) -> Self {
+        Pmt::U32(f)
+    }
+}
+
+impl From<u64> for Pmt {
+    fn from(f: u64) -> Self {
+        Pmt::U64(f)
+    }
+}
+
+impl From<usize> for Pmt {
+    fn from(f: usize) -> Self {
+        Pmt::Usize(f)
+    }
+}
+
+impl From<isize> for Pmt {
+    fn from(f: isize) -> Self {
+        Pmt::Isize(f)
+    }
+}
+
+impl From<Vec<f32>> for Pmt {
+    fn from(v: Vec<f32>) -> Self {
+        Pmt::VecF32(v)
+    }
+}
+
+impl From<Vec<u64>> for Pmt {
+    fn from(v: Vec<u64>) -> Self {
+        Pmt::VecU64(v)
+    }
+}
+
+impl From<Vec<Complex32>> for Pmt {
+    fn from(v: Vec<Complex32>) -> Self {
+        Pmt::VecCF32(v)
     }
 }
 
 /// PMT types that do not wrap values.
 ///
-/// Usefull for bindings to other languages that do not support Rust's broad enum features.
+/// Useful for bindings to other languages that do not support Rust's broad enum features.
 #[non_exhaustive]
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PmtKind {
     /// Ok
     Ok,
@@ -319,6 +513,18 @@ pub enum PmtKind {
     MapStrPmt,
     /// Any
     Any,
+}
+
+impl From<Pmt> for PmtKind {
+    fn from(value: Pmt) -> Self {
+        value.kind()
+    }
+}
+
+impl From<&Pmt> for PmtKind {
+    fn from(value: &Pmt) -> Self {
+        value.kind()
+    }
 }
 
 impl fmt::Display for PmtKind {
@@ -435,6 +641,14 @@ mod test {
         let f3 = Pmt::F32(0.2);
         assert_eq!(f1, f2);
         assert_ne!(f1, f3);
+
+        let fv1 = Pmt::VecF32(vec![1.0, 2.0, 3.0]);
+        let fv2 = Pmt::VecF32(vec![1.0, 2.0, 3.0]);
+        assert_eq!(fv1, fv2);
+
+        let cfv1 = Pmt::VecCF32(vec![Complex32::new(1.0, 2.0), Complex32::new(3.0, 4.0)]);
+        let cfv2 = Pmt::VecCF32(vec![Complex32::new(1.0, 2.0), Complex32::new(3.0, 4.0)]);
+        assert_eq!(cfv1, cfv2);
     }
 
     #[test]
@@ -475,5 +689,94 @@ mod test {
         } else {
             panic!("Not a Pmt::MapStrPmt");
         }
+    }
+
+    #[test]
+    fn from_into() {
+        let e = 42usize;
+        let p = Pmt::from(e);
+        assert_eq!(p, Pmt::Usize(e));
+        assert_eq!((&p).try_into(), Ok(e));
+
+        let e = 42isize;
+        let p = Pmt::from(e);
+        assert_eq!(p, Pmt::Isize(e));
+        assert_eq!((&p).try_into(), Ok(e));
+
+        let e = 42u32;
+        let p = Pmt::from(e);
+        assert_eq!(p, Pmt::U32(e));
+        // Lossy conversion unsupported
+        // assert_eq!(p.try_into(), Ok(e));
+
+        let e = 42u64;
+        let p = Pmt::from(e);
+        assert_eq!(p, Pmt::U64(e));
+        assert_eq!((&p).try_into(), Ok(e));
+
+        let e = 42f64;
+        let p = Pmt::from(e);
+        assert_eq!(p, Pmt::F64(e));
+        assert_eq!(p.try_into(), Ok(e));
+
+        let e = 42f32;
+        let p = Pmt::from(e);
+        assert_eq!(p, Pmt::F32(e));
+        // Lossy conversion unsupported
+        //assert_eq!(p.try_into(), Ok(e));
+
+        let e = true;
+        let p = Pmt::from(e);
+        assert_eq!(p, Pmt::Bool(e));
+        assert_eq!((&p).try_into(), Ok(e));
+
+        let e = vec![1.0, 2.0, 3.0];
+        let p = Pmt::from(e.clone());
+        assert_eq!(p, Pmt::VecF32(e.clone()));
+        assert_eq!(p.try_into(), Ok(e));
+
+        let e = vec![1, 2, 3];
+        let p = Pmt::from(e.clone());
+        assert_eq!(p, Pmt::VecU64(e.clone()));
+        assert_eq!(p.try_into(), Ok(e));
+
+        let e = vec![Complex32::new(1.0, 2.0), Complex32::new(3.0, 4.0)];
+        let p = Pmt::from(e.clone());
+        assert_eq!(p, Pmt::VecCF32(e.clone()));
+        assert_eq!(p.try_into(), Ok(e));
+    }
+
+    #[test]
+    fn pmt_kind() {
+        let p = Pmt::U32(42);
+        assert_eq!(PmtKind::U32, p.kind());
+        assert_eq!(PmtKind::U32, p.into());
+
+        let p = Pmt::F64(42.0);
+        assert_eq!(PmtKind::F64, p.kind());
+        assert_eq!(PmtKind::F64, p.into());
+
+        let p = Pmt::VecF32(vec![]);
+        assert_eq!(PmtKind::VecF32, p.kind());
+        assert_eq!(PmtKind::VecF32, p.into());
+
+        let p = Pmt::VecU64(vec![]);
+        assert_eq!(PmtKind::VecU64, p.kind());
+        assert_eq!(PmtKind::VecU64, (&p).into());
+
+        let p = Pmt::VecCF32(vec![]);
+        assert_eq!(PmtKind::VecCF32, p.kind());
+        assert_eq!(PmtKind::VecCF32, (&p).into());
+    }
+
+    #[test]
+    fn take_any() {
+        let p = Pmt::Any(Box::new(vec![1u8]));
+
+        let Pmt::Any(p_any) = p else { unreachable!() };
+        assert!(p_any.is::<Vec<u8>>());
+
+        let v = p_any.take::<Vec<u8>>().unwrap();
+        assert_eq!(v[0], 1u8)
     }
 }

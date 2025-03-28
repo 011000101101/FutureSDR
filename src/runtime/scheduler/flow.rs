@@ -3,16 +3,25 @@ use async_lock::Barrier;
 use async_task::Runnable;
 use async_task::Task;
 use concurrent_queue::ConcurrentQueue;
-use futures::channel::mpsc::{channel, Sender};
+use futures::channel::mpsc::channel;
+use futures::channel::mpsc::Sender;
 use futures::channel::oneshot;
-use futures_lite::future::{self, Future, FutureExt};
+use futures_lite::future::Future;
+use futures_lite::future::FutureExt;
+use futures_lite::future::{self};
 use slab::Slab;
 // use std::cmp;
 use std::fmt;
-use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
-use std::task::{Poll, Waker};
+use std::panic::RefUnwindSafe;
+use std::panic::UnwindSafe;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::RwLock;
+use std::task::Poll;
+use std::task::Waker;
 use std::thread;
 
 use crate::runtime::config;
@@ -43,8 +52,12 @@ impl fmt::Debug for FlowSchedulerInner {
 impl Drop for FlowSchedulerInner {
     fn drop(&mut self) {
         for i in self.workers.drain(..) {
-            i.1.send(()).unwrap();
-            i.0.join().unwrap();
+            if i.1.send(()).is_err() {
+                warn!("Worker task already terminated.");
+            }
+            if std::thread::current().id() != i.0.thread().id() && i.0.join().is_err() {
+                warn!("Worker thread already terminated.");
+            }
         }
     }
 }
@@ -76,7 +89,6 @@ impl FlowScheduler {
                             b.wait().await;
                             receiver.await
                         }))
-                        .unwrap();
                     }));
                     if result.is_err() {
                         eprintln!("flow worker panicked {result:?}");

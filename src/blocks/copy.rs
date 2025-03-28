@@ -1,12 +1,12 @@
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Copy input samples to the output.
@@ -16,8 +16,8 @@ pub struct Copy<T: core::marker::Copy + Send + 'static> {
 
 impl<T: core::marker::Copy + Send + 'static> Copy<T> {
     /// Create [`struct@Copy`] block
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Copy").build(),
             StreamIoBuilder::new()
                 .add_input::<T>("in")

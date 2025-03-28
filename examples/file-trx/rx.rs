@@ -1,10 +1,12 @@
+use anyhow::Result;
 use clap::Parser;
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::blocks::Apply;
+use futuresdr::blocks::FileSink;
+use futuresdr::blocks::FileSource;
 use futuresdr::blocks::Head;
-use futuresdr::blocks::{FileSink, FileSource};
-use futuresdr::num_complex::{Complex, Complex32};
+use futuresdr::num_complex::Complex;
+use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
 use std::time::Instant;
@@ -66,7 +68,7 @@ fn main() -> Result<()> {
                 .gain(args.gain)
                 .args(a)?
                 .build()?,
-        ),
+        )?,
         (None, Some(input)) => {
             let format = args
                 .format_in
@@ -77,11 +79,11 @@ fn main() -> Result<()> {
                 .expect("Input format could not be determined!");
             match format.as_str() {
                 "cs8" => {
-                    let src = fg.add_block(FileSource::<Complex<i8>>::new(input, false));
+                    let src = fg.add_block(FileSource::<Complex<i8>>::new(input, false))?;
                     let typecvt = fg.add_block(Apply::new(|i: &Complex32| Complex {
                         re: i.re / 127.,
                         im: i.im / 127.,
-                    }));
+                    }))?;
                     fg.connect_stream(src, "out", typecvt, "in")?;
                     typecvt
                 }
@@ -96,7 +98,7 @@ fn main() -> Result<()> {
     };
 
     let src = if let Some(samples) = args.samples {
-        let sample_counter = fg.add_block(Head::<Complex<f32>>::new(samples));
+        let sample_counter = fg.add_block(Head::<Complex<f32>>::new(samples))?;
         fg.connect_stream(src, "out", sample_counter, "in")?;
         sample_counter
     } else {
@@ -123,7 +125,7 @@ fn main() -> Result<()> {
             last_power_print = Instant::now();
         }
         *i
-    }));
+    }))?;
 
     fg.connect_stream(src, "out", powermeter, "in")?;
 
@@ -139,13 +141,13 @@ fn main() -> Result<()> {
             let typecvt = fg.add_block(Apply::new(|i: &Complex32| Complex {
                 re: (i.re * 127.) as i8,
                 im: (i.im * 127.) as i8,
-            }));
-            let sink = fg.add_block(FileSink::<Complex<i8>>::new(&args.out));
+            }))?;
+            let sink = fg.add_block(FileSink::<Complex<i8>>::new(&args.out))?;
             fg.connect_stream(powermeter, "out", typecvt, "in")?;
             fg.connect_stream(typecvt, "out", sink, "in")?;
         }
         "cf32" => {
-            let sink = fg.add_block(FileSink::<Complex<f32>>::new(&args.out));
+            let sink = fg.add_block(FileSink::<Complex<f32>>::new(&args.out))?;
             fg.connect_stream(powermeter, "out", sink, "in")?;
         }
         format => {

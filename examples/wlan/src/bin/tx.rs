@@ -1,17 +1,17 @@
 use clap::Parser;
-use std::time::Duration;
-
-use futuresdr::anyhow::Result;
 use futuresdr::async_io::Timer;
 use futuresdr::blocks::seify::SinkBuilder;
 use futuresdr::blocks::Fft;
 use futuresdr::blocks::FftDirection;
 use futuresdr::runtime::buffer::circular::Circular;
+use futuresdr::runtime::copy_tag_propagation;
+use futuresdr::runtime::BlockT;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::Runtime;
+use std::time::Duration;
 
-use wlan::fft_tag_propagation;
 use wlan::parse_channel;
 use wlan::Encoder;
 use wlan::Mac;
@@ -64,10 +64,10 @@ fn main() -> Result<()> {
     };
 
     let mut fg = Flowgraph::new();
-    let mac = fg.add_block(Mac::new([0x42; 6], [0x23; 6], [0xff; 6]));
-    let encoder = fg.add_block(Encoder::new(Mcs::Qpsk_1_2));
+    let mac = fg.add_block(Mac::new([0x42; 6], [0x23; 6], [0xff; 6]))?;
+    let encoder = fg.add_block(Encoder::new(Mcs::Qpsk_1_2))?;
     fg.connect_message(mac, "tx", encoder, "tx")?;
-    let mapper = fg.add_block(Mapper::new());
+    let mapper = fg.add_block(Mapper::new())?;
     fg.connect_stream(encoder, "out", mapper, "in")?;
     let mut fft = Fft::with_options(
         64,
@@ -75,10 +75,10 @@ fn main() -> Result<()> {
         true,
         Some((1.0f32 / 52.0).sqrt()),
     );
-    fft.set_tag_propagation(Box::new(fft_tag_propagation));
-    let fft = fg.add_block(fft);
+    fft.set_tag_propagation(Box::new(copy_tag_propagation));
+    let fft = fg.add_block(fft)?;
     fg.connect_stream(mapper, "out", fft, "in")?;
-    let prefix = fg.add_block(Prefix::new(PAD_FRONT, PAD_TAIL));
+    let prefix = fg.add_block(Prefix::new(PAD_FRONT, PAD_TAIL))?;
     fg.connect_stream_with_type(
         fft,
         "out",
@@ -94,7 +94,7 @@ fn main() -> Result<()> {
         .args(args.args)?
         .build()?;
 
-    let snk = fg.add_block(snk);
+    let snk = fg.add_block(snk)?;
     fg.connect_stream_with_type(
         prefix,
         "out",

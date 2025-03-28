@@ -1,18 +1,16 @@
-use std::marker::PhantomData;
-
-use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
 use futuresdr::num_complex::Complex32;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
+use std::marker::PhantomData;
 
 const MAX_ITER: usize = 4000;
 
@@ -45,11 +43,7 @@ pub struct MovingAverage<T: MovingAverageType + Send + 'static> {
 }
 
 impl<T: MovingAverageType + Send + 'static> MovingAverage<T> {
-    pub fn new(len: usize) -> Block {
-        Block::from_typed(Self::new_typed(len))
-    }
-
-    pub fn new_typed(len: usize) -> TypedBlock<Self> {
+    pub fn new(len: usize) -> TypedBlock<Self> {
         assert!(len > 0);
         TypedBlock::new(
             BlockMetaBuilder::new("MovingAverage").build(),
@@ -120,34 +114,34 @@ mod test {
 
     #[test]
     fn mov_avg_one() {
-        let mut mocker = Mocker::new(MovingAverage::<f32>::new_typed(2));
+        let mut mocker = Mocker::new(MovingAverage::<f32>::new(2));
         mocker.input(0, vec![1.0f32, 2.0]);
         mocker.init_output::<f32>(0, 64);
         mocker.run();
         let output = mocker.output::<f32>(0);
 
-        assert_eq!(output, vec![0.0, 3.0]);
+        assert_eq!(output.0, vec![0.0, 3.0]);
     }
 
     #[test]
     fn mov_avg_no_data() {
-        let mut mocker = Mocker::new(MovingAverage::<f32>::new_typed(3));
+        let mut mocker = Mocker::new(MovingAverage::<f32>::new(3));
         mocker.input(0, vec![1.0f32, 2.0]);
         mocker.init_output::<f32>(0, 64);
         mocker.run();
         let output = mocker.output::<f32>(0);
 
-        assert_eq!(output, vec![0.0, 0.0]);
+        assert_eq!(output.0, vec![0.0, 0.0]);
     }
 
     #[test]
     fn mov_avg_data() {
-        let mut mocker = Mocker::new(MovingAverage::<f32>::new_typed(2));
+        let mut mocker = Mocker::new(MovingAverage::<f32>::new(2));
         mocker.input(0, vec![1.0f32, 2.0, 3.0, 4.0]);
         mocker.init_output::<f32>(0, 64);
         mocker.run();
         let output = mocker.output::<f32>(0);
 
-        assert_eq!(output, vec![0.0, 3.0, 5.0, 7.0]);
+        assert_eq!(output.0, vec![0.0, 3.0, 5.0, 7.0]);
     }
 }

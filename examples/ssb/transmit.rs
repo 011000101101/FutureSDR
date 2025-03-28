@@ -1,5 +1,5 @@
+use anyhow::Result;
 use clap::Parser;
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::audio::*;
 use futuresdr::blocks::Apply;
 use futuresdr::blocks::ApplyNM;
@@ -14,7 +14,8 @@ use futuresdr::macros::connect;
 use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
-use hound::{SampleFormat, WavSpec};
+use hound::SampleFormat;
+use hound::WavSpec;
 use std::f32::consts::TAU;
 use std::path::Path;
 
@@ -69,14 +70,13 @@ fn main() -> Result<()> {
     let mut fg = Flowgraph::new();
 
     let source = FileSource::new(&cli.input);
-    let src_kernel = source.kernel::<FileSource>().unwrap();
     assert!(
-        src_kernel.channels() == 1,
+        source.kernel.channels() == 1,
         "Input audio must be mono but found {} channels",
-        src_kernel.channels()
+        source.kernel.channels()
     );
 
-    let audio_rate = src_kernel.sample_rate() as f64;
+    let audio_rate = source.kernel.sample_rate() as f64;
     let file_rate = cli.sample_rate;
 
     // Using a bandpass instead, can help to tame low frequencies bleeding

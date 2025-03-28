@@ -1,13 +1,12 @@
+use anyhow::Result;
 use clap::Parser;
-use std::time;
-
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::MessageBurst;
 use futuresdr::blocks::MessageCopy;
 use futuresdr::blocks::MessageSink;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
+use std::time;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -38,15 +37,15 @@ fn main() -> Result<()> {
         let mut snks = Vec::new();
 
         for _ in 0..pipes {
-            prev = fg.add_block(MessageBurst::new(Pmt::F64(1.23), burst_size));
+            prev = fg.add_block(MessageBurst::new(Pmt::F64(1.23), burst_size))?;
 
             for _ in 1..stages {
-                let block = fg.add_block(MessageCopy::new());
+                let block = fg.add_block(MessageCopy::new())?;
                 fg.connect_message(prev, "out", block, "in")?;
                 prev = block;
             }
 
-            let snk = fg.add_block(MessageSink::new());
+            let snk = fg.add_block(MessageSink::new())?;
             snks.push(snk);
             fg.connect_message(prev, "out", snk, "in")?;
         }

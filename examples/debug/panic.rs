@@ -1,13 +1,20 @@
-use clap::{Parser, ValueEnum};
-
-use futuresdr::anyhow::Result;
+use clap::Parser;
+use clap::ValueEnum;
 use futuresdr::macros::async_trait;
 use futuresdr::macros::connect;
 use futuresdr::runtime::scheduler;
-use futuresdr::runtime::{
-    Block, BlockMeta, BlockMetaBuilder, Flowgraph, Kernel, MessageIo, MessageIoBuilder, Runtime,
-    StreamIo, StreamIoBuilder, WorkIo,
-};
+use futuresdr::runtime::BlockMeta;
+use futuresdr::runtime::BlockMetaBuilder;
+use futuresdr::runtime::Flowgraph;
+use futuresdr::runtime::Kernel;
+use futuresdr::runtime::MessageIo;
+use futuresdr::runtime::MessageIoBuilder;
+use futuresdr::runtime::Result;
+use futuresdr::runtime::Runtime;
+use futuresdr::runtime::StreamIo;
+use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::TypedBlock;
+use futuresdr::runtime::WorkIo;
 
 #[derive(Debug, Clone, ValueEnum)]
 enum PanicWhere {
@@ -31,7 +38,7 @@ struct Args {
     scheduler: Scheduler,
 }
 
-fn main() {
+fn main() -> Result<()> {
     let args = Args::parse();
     println!("Configuration: {args:?}");
 
@@ -51,6 +58,8 @@ fn main() {
             let _ = Runtime::with_scheduler(scheduler::FlowScheduler::new()).run(fg);
         }
     }
+
+    Ok(())
 }
 
 struct Panic {
@@ -59,8 +68,8 @@ struct Panic {
 
 impl Panic {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(w: PanicWhere) -> Block {
-        Block::new(
+    pub fn new(w: PanicWhere) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Panic").build(),
             StreamIoBuilder::new().build(),
             MessageIoBuilder::<Self>::new().build(),

@@ -1,14 +1,14 @@
-use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
 use futuresdr::num_complex::Complex32;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 use futuresdr::tracing::info;
 use rustfft::Fft;
@@ -30,8 +30,8 @@ pub struct DecoderBlock {
 }
 
 impl DecoderBlock {
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("RattegramDecoder").build(),
             StreamIoBuilder::new().add_input::<f32>("in").build(),
             MessageIoBuilder::new().build(),
@@ -891,7 +891,7 @@ pub struct Decoder {
     generator: [i8; 255 * 71],
     code: [i8; Self::CODE_LEN],
     osd: OrderedStatisticsDecoder,
-    data: [u8; (Self::PRE_SEQ_LEN + 7) / 8],
+    data: [u8; Self::PRE_SEQ_LEN.div_ceil(8)],
     cons: [Complex32; Self::PAY_CAR_CNT],
     prev: [Complex32; Self::PAY_CAR_CNT],
     index: [f32; Self::PAY_CAR_CNT],
@@ -1048,7 +1048,7 @@ impl Decoder {
             polar: PolarDecoder::new(),
             code: [0; Self::CODE_LEN],
             osd: OrderedStatisticsDecoder::new(),
-            data: [0; (Self::PRE_SEQ_LEN + 7) / 8],
+            data: [0; Self::PRE_SEQ_LEN.div_ceil(8)],
             cons: [Complex32::new(0.0, 0.0); Self::PAY_CAR_CNT],
             prev: [Complex32::new(0.0, 0.0); Self::PAY_CAR_CNT],
             index: [0.0; Self::PAY_CAR_CNT],

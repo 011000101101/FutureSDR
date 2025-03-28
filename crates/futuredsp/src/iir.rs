@@ -1,7 +1,8 @@
 //! IIR filters
 extern crate alloc;
 use alloc::vec::Vec;
-use core::ops::{AddAssign, Mul};
+use core::ops::AddAssign;
+use core::ops::Mul;
 use num_traits::Zero;
 
 use crate::ComputationStatus;
@@ -145,7 +146,7 @@ where
         }
 
         // Update the memory
-        for idx in 1..memory.len() {
+        for idx in (1..memory.len()).rev() {
             memory[idx] = memory[idx - 1];
         }
         if !memory.is_empty() {

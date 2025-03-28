@@ -1,8 +1,12 @@
-use rustc_version::{version_meta, Channel};
+use rustc_version::version_meta;
+use rustc_version::Channel;
 
-#[cfg(feature = "lttng")]
+#[cfg(all(feature = "lttng", target_os = "linux"))]
 fn gen_lttng_tracepoints() {
-    use lttng_ust_generate::{CIntegerType, CTFType, Generator, Provider};
+    use lttng_ust_generate::CIntegerType;
+    use lttng_ust_generate::CTFType;
+    use lttng_ust_generate::Generator;
+    use lttng_ust_generate::Provider;
     use std::env;
     use std::path::PathBuf;
 
@@ -44,6 +48,6 @@ fn main() {
         }
     }
 
-    #[cfg(feature = "lttng")]
+    #[cfg(all(feature = "lttng", target_os = "linux"))]
     gen_lttng_tracepoints();
 }

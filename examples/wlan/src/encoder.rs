@@ -1,24 +1,24 @@
-use crate::FrameParam;
-use crate::Mcs;
-use crate::MAX_ENCODED_BITS;
-use crate::MAX_PSDU_SIZE;
-
-use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
 use futuresdr::macros::message_handler;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 use futuresdr::tracing::warn;
 use std::collections::VecDeque;
+
+use crate::FrameParam;
+use crate::Mcs;
+use crate::MAX_ENCODED_BITS;
+use crate::MAX_PSDU_SIZE;
 
 /// Maximum number of frames to queue for transmission
 const MAX_FRAMES: usize = 1000;
@@ -39,8 +39,8 @@ pub struct Encoder {
 }
 
 impl Encoder {
-    pub fn new(default_mcs: Mcs) -> Block {
-        Block::new(
+    pub fn new(default_mcs: Mcs) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Encoder").build(),
             StreamIoBuilder::new().add_output::<u8>("out").build(),
             MessageIoBuilder::new()

@@ -1,7 +1,5 @@
+use anyhow::Result;
 use clap::Parser;
-use std::time::Duration;
-
-use futuresdr::anyhow::Result;
 use futuresdr::async_io::block_on;
 use futuresdr::async_io::Timer;
 use futuresdr::blocks::seify::SinkBuilder;
@@ -11,6 +9,7 @@ use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
+use std::time::Duration;
 
 use zigbee::modulator;
 use zigbee::parse_channel;
@@ -41,16 +40,16 @@ fn main() -> Result<()> {
     // ========================================
     // TRANSMITTER
     // ========================================
-    let mac = fg.add_block(Mac::new());
-    let modulator = fg.add_block(modulator());
-    let iq_delay = fg.add_block(IqDelay::new());
+    let mac = fg.add_block(Mac::new())?;
+    let modulator = fg.add_block(modulator())?;
+    let iq_delay = fg.add_block(IqDelay::new())?;
     let snk = fg.add_block(
         SinkBuilder::new()
             .frequency(args.tx_freq)
             .sample_rate(4e6)
             .gain(args.tx_gain)
             .build()?,
-    );
+    )?;
 
     fg.connect_stream(mac, "out", modulator, "in")?;
     fg.connect_stream(modulator, "out", iq_delay, "in")?;
@@ -65,7 +64,7 @@ fn main() -> Result<()> {
             .sample_rate(4e6)
             .gain(args.rx_gain)
             .build()?,
-    );
+    )?;
 
     let mut last: Complex32 = Complex32::new(0.0, 0.0);
     let mut iir: f32 = 0.0;
@@ -75,7 +74,7 @@ fn main() -> Result<()> {
         last = *i;
         iir = (1.0 - alpha) * iir + alpha * phase;
         phase - iir
-    }));
+    }))?;
 
     let omega = 2.0;
     let gain_omega = 0.000225;
@@ -88,9 +87,9 @@ fn main() -> Result<()> {
         mu,
         gain_mu,
         omega_relative_limit,
-    ));
+    ))?;
 
-    let decoder = fg.add_block(Decoder::new(6));
+    let decoder = fg.add_block(Decoder::new(6))?;
 
     fg.connect_stream(src, "out", avg, "in")?;
     fg.connect_stream(avg, "out", mm, "in")?;

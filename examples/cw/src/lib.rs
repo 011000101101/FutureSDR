@@ -1,10 +1,10 @@
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::audio::AudioSink;
 use futuresdr::blocks::ApplyIntoIter;
 use futuresdr::blocks::Combine;
 use futuresdr::blocks::SignalSourceBuilder;
 use futuresdr::blocks::VectorSource;
 use futuresdr::runtime::Flowgraph;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::Runtime;
 use std::fmt;
 
@@ -85,25 +85,22 @@ const DOT_LENGTH: usize = SAMPLE_RATE / 20;
 
 impl IntoIterator for CWAlphabet {
     type Item = f32;
-    type IntoIter = std::iter::Chain<
-        std::iter::Take<std::iter::Repeat<f32>>,
-        std::iter::Take<std::iter::Repeat<f32>>,
-    >;
+    type IntoIter = std::iter::Chain<std::iter::RepeatN<f32>, std::iter::RepeatN<f32>>;
 
     fn into_iter(self) -> Self::IntoIter {
         match self {
-            CWAlphabet::Dot => std::iter::repeat(1.0)
-                .take(DOT_LENGTH)
-                .chain(std::iter::repeat(0.0).take(DOT_LENGTH)),
-            CWAlphabet::Dash => std::iter::repeat(1.0)
-                .take(3 * DOT_LENGTH)
-                .chain(std::iter::repeat(0.0).take(DOT_LENGTH)),
-            CWAlphabet::LetterSpace => std::iter::repeat(0.0)
-                .take(3 * DOT_LENGTH)
-                .chain(std::iter::repeat(0.0).take(0)),
-            CWAlphabet::WordSpace => std::iter::repeat(0.0)
-                .take((5 - 2) * DOT_LENGTH)
-                .chain(std::iter::repeat(0.0).take(0)),
+            CWAlphabet::Dot => {
+                std::iter::repeat_n(1.0, DOT_LENGTH).chain(std::iter::repeat_n(0.0, DOT_LENGTH))
+            }
+            CWAlphabet::Dash => {
+                std::iter::repeat_n(1.0, 3 * DOT_LENGTH).chain(std::iter::repeat_n(0.0, DOT_LENGTH))
+            }
+            CWAlphabet::LetterSpace => {
+                std::iter::repeat_n(0.0, 3 * DOT_LENGTH).chain(std::iter::repeat_n(0.0, 0))
+            }
+            CWAlphabet::WordSpace => {
+                std::iter::repeat_n(0.0, (5 - 2) * DOT_LENGTH).chain(std::iter::repeat_n(0.0, 0))
+            }
         }
     }
 }
@@ -112,16 +109,17 @@ pub async fn run_fg(msg: String) -> Result<()> {
     let msg: Vec<char> = msg.to_uppercase().chars().collect();
 
     let mut fg = Flowgraph::new();
-    let src = fg.add_block(VectorSource::<char>::new(msg));
-    let audio_snk = fg.add_block(AudioSink::new(SAMPLE_RATE.try_into().unwrap(), 1));
-    let morse = fg.add_block(ApplyIntoIter::<_, _, Vec<CWAlphabet>>::new(morse));
-    let switch_command = fg.add_block(ApplyIntoIter::<_, _, CWAlphabet>::new(|c: &CWAlphabet| *c));
+    let src = fg.add_block(VectorSource::<char>::new(msg))?;
+    let audio_snk = fg.add_block(AudioSink::new(SAMPLE_RATE.try_into().unwrap(), 1))?;
+    let morse = fg.add_block(ApplyIntoIter::<_, _, Vec<CWAlphabet>>::new(morse))?;
+    let switch_command =
+        fg.add_block(ApplyIntoIter::<_, _, CWAlphabet>::new(|c: &CWAlphabet| *c))?;
     let sidetone_src = fg.add_block(
         SignalSourceBuilder::<f32>::sin(SIDETONE_FREQ, SAMPLE_RATE as f32)
             .amplitude(0.5)
             .build(),
-    );
-    let switch_sidetone = fg.add_block(Combine::new(|a: &f32, b: &f32| -> f32 { *a * *b }));
+    )?;
+    let switch_sidetone = fg.add_block(Combine::new(|a: &f32, b: &f32| -> f32 { *a * *b }))?;
 
     fg.connect_stream(src, "out", morse, "in")?;
     fg.connect_stream(morse, "out", switch_command, "in")?;

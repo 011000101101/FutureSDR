@@ -1,22 +1,27 @@
-use crate::anyhow::Result;
-use crate::runtime::Block;
-use crate::runtime::BlockMeta;
-use crate::runtime::BlockMetaBuilder;
-use crate::runtime::Kernel;
-use crate::runtime::MessageIo;
-use crate::runtime::MessageIoBuilder;
-use crate::runtime::StreamIo;
-use crate::runtime::StreamIoBuilder;
-use crate::runtime::WorkIo;
-use futures::{channel, SinkExt, StreamExt};
+use futures::channel;
+use futures::SinkExt;
+use futures::StreamExt;
 use gloo_net::websocket::futures::WebSocket;
 use gloo_net::websocket::Message;
-use gloo_net::websocket::WebSocketError::{ConnectionClose, ConnectionError, MessageSendError};
+use gloo_net::websocket::WebSocketError::ConnectionClose;
+use gloo_net::websocket::WebSocketError::ConnectionError;
+use gloo_net::websocket::WebSocketError::MessageSendError;
 use std::marker::PhantomData;
 use std::mem::size_of;
 use std::sync::Arc;
 use std::sync::RwLock;
 use wasm_bindgen_futures::spawn_local;
+
+use crate::runtime::BlockMeta;
+use crate::runtime::BlockMetaBuilder;
+use crate::runtime::Kernel;
+use crate::runtime::MessageIo;
+use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
+use crate::runtime::StreamIo;
+use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
+use crate::runtime::WorkIo;
 
 /// WASM Websocket Sink
 pub struct WasmWsSink<T> {
@@ -29,7 +34,7 @@ pub struct WasmWsSink<T> {
 
 impl<T: Send + Sync + 'static> WasmWsSink<T> {
     /// Create WASM Websocket Sink block
-    pub fn new(url: String, iterations_per_send: usize) -> Block {
+    pub fn new(url: String, iterations_per_send: usize) -> TypedBlock<Self> {
         let (sender, mut receiver) = channel::mpsc::channel::<Vec<u8>>(1);
 
         let ws_error = Arc::new(RwLock::new(false));
@@ -64,7 +69,7 @@ impl<T: Send + Sync + 'static> WasmWsSink<T> {
             }
         });
 
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("WasmWsSink").build(),
             StreamIoBuilder::new().add_input::<T>("in").build(),
             MessageIoBuilder::<Self>::new().build(),

@@ -1,4 +1,5 @@
-use futuresdr::anyhow::{anyhow, Result};
+use anyhow::anyhow;
+use anyhow::Result;
 use futuresdr::async_io::block_on;
 use futuresdr::blocks::ChannelSource;
 use futuresdr::blocks::VectorSink;
@@ -12,8 +13,8 @@ fn channel_source_min() -> Result<()> {
     let mut fg = Flowgraph::new();
     let (mut tx, rx) = mpsc::channel(10);
 
-    let cs = fg.add_block(ChannelSource::<u32>::new(rx));
-    let snk = fg.add_block(VectorSink::<u32>::new(1024));
+    let cs = fg.add_block(ChannelSource::<u32>::new(rx))?;
+    let snk = fg.add_block(VectorSink::<u32>::new(1024))?;
     fg.connect_stream(cs, "out", snk, "in")?;
 
     let rt = Runtime::new();
@@ -36,8 +37,8 @@ fn channel_source_small() -> Result<()> {
     let mut fg = Flowgraph::new();
     let (mut tx, rx) = mpsc::channel(10);
 
-    let cs = fg.add_block(ChannelSource::<u32>::new(rx));
-    let snk = fg.add_block(VectorSink::<u32>::new(1024));
+    let cs = fg.add_block(ChannelSource::<u32>::new(rx))?;
+    let snk = fg.add_block(VectorSink::<u32>::new(1024))?;
     fg.connect_stream(cs, "out", snk, "in")?;
 
     let rt = Runtime::new();
@@ -63,8 +64,8 @@ fn channel_source_big() -> Result<()> {
     let mut fg = Flowgraph::new();
     let (mut tx, rx) = mpsc::channel(10);
 
-    let cs = fg.add_block(ChannelSource::<u32>::new(rx));
-    let snk = fg.add_block(VectorSink::<u32>::new(1024));
+    let cs = fg.add_block(ChannelSource::<u32>::new(rx))?;
+    let snk = fg.add_block(VectorSink::<u32>::new(1024))?;
     fg.connect_stream(cs, "out", snk, "in")?;
 
     let rt = Runtime::new();

@@ -1,7 +1,4 @@
-use std::iter::repeat_with;
-use std::sync::Arc;
-
-use futuresdr::anyhow::Result;
+use anyhow::Result;
 use futuresdr::blocks::VectorSink;
 use futuresdr::blocks::VectorSinkBuilder;
 use futuresdr::blocks::VectorSource;
@@ -10,6 +7,8 @@ use futuresdr::runtime::buffer::vulkan;
 use futuresdr::runtime::buffer::vulkan::Broker;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
+use std::iter::repeat_with;
+use std::sync::Arc;
 
 #[test]
 fn fg_vulkan() -> Result<()> {
@@ -24,9 +23,9 @@ fn fg_vulkan() -> Result<()> {
     let vulkan = VulkanBuilder::new(broker).build();
     let snk = VectorSinkBuilder::<f32>::new().build();
 
-    let src = fg.add_block(src);
-    let vulkan = fg.add_block(vulkan);
-    let snk = fg.add_block(snk);
+    let src = fg.add_block(src)?;
+    let vulkan = fg.add_block(vulkan)?;
+    let snk = fg.add_block(snk)?;
 
     fg.connect_stream_with_type(src, "out", vulkan, "in", vulkan::H2D::new())?;
     fg.connect_stream_with_type(vulkan, "out", snk, "in", vulkan::D2H::new())?;

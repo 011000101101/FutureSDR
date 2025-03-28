@@ -1,7 +1,6 @@
+use anyhow::Context;
+use anyhow::Result;
 use clap::Parser;
-use std::time;
-
-use futuresdr::anyhow::{Context, Result};
 use futuresdr::blocks::lttng::NullSink;
 use futuresdr::blocks::lttng::NullSource;
 use futuresdr::blocks::CopyRandBuilder;
@@ -11,6 +10,7 @@ use futuresdr::runtime::scheduler::SmolScheduler;
 use futuresdr::runtime::scheduler::TpbScheduler;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
+use std::time;
 
 const GRANULARITY: u64 = 32768;
 
@@ -44,20 +44,20 @@ fn main() -> Result<()> {
     let mut snks = Vec::new();
 
     for _ in 0..pipes {
-        let src = fg.add_block(NullSource::<f32>::new(GRANULARITY));
-        let head = fg.add_block(Head::<f32>::new(samples as u64));
+        let src = fg.add_block(NullSource::<f32>::new(GRANULARITY))?;
+        let head = fg.add_block(Head::<f32>::new(samples as u64))?;
         fg.connect_stream(src, "out", head, "in")?;
 
-        let mut last = fg.add_block(CopyRandBuilder::<f32>::new().max_copy(max_copy).build());
+        let mut last = fg.add_block(CopyRandBuilder::<f32>::new().max_copy(max_copy).build())?;
         fg.connect_stream(head, "out", last, "in")?;
 
         for _ in 1..stages {
-            let block = fg.add_block(CopyRandBuilder::<f32>::new().max_copy(max_copy).build());
+            let block = fg.add_block(CopyRandBuilder::<f32>::new().max_copy(max_copy).build())?;
             fg.connect_stream(last, "out", block, "in")?;
             last = block;
         }
 
-        let snk = fg.add_block(NullSink::<f32>::new(GRANULARITY));
+        let snk = fg.add_block(NullSink::<f32>::new(GRANULARITY))?;
         fg.connect_stream(last, "out", snk, "in")?;
         snks.push(snk);
     }

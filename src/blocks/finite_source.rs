@@ -1,12 +1,12 @@
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Repeatedly apply a function to generate samples, using [Option] values to allow termination.
@@ -25,8 +25,8 @@ where
     A: Send + 'static,
 {
     /// Create FiniteSource block
-    pub fn new(f: F) -> Block {
-        Block::new(
+    pub fn new(f: F) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("FiniteSource").build(),
             StreamIoBuilder::new().add_output::<A>("out").build(),
             MessageIoBuilder::<Self>::new().build(),

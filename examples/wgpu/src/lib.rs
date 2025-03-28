@@ -1,6 +1,5 @@
-use std::iter::repeat_with;
-
-use futuresdr::anyhow::{Context, Result};
+use anyhow::Context;
+use anyhow::Result;
 use futuresdr::blocks::VectorSink;
 use futuresdr::blocks::VectorSource;
 use futuresdr::blocks::Wgpu;
@@ -8,6 +7,7 @@ use futuresdr::runtime::buffer::wgpu;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
 use futuresdr::tracing::info;
+use std::iter::repeat_with;
 
 pub async fn run() {
     run_inner().await.unwrap()
@@ -24,9 +24,9 @@ async fn run_inner() -> Result<()> {
     let mul = Wgpu::new(broker, 4096, 3, 4);
     let snk = VectorSink::<f32>::new(1024);
 
-    let src = fg.add_block(src);
-    let mul = fg.add_block(mul);
-    let snk = fg.add_block(snk);
+    let src = fg.add_block(src)?;
+    let mul = fg.add_block(mul)?;
+    let snk = fg.add_block(snk)?;
 
     fg.connect_stream_with_type(src, "out", mul, "in", wgpu::H2D::new())?;
     fg.connect_stream_with_type(mul, "out", snk, "in", wgpu::D2H::new())?;

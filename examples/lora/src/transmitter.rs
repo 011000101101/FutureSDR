@@ -1,8 +1,10 @@
-use futuresdr::anyhow::Result;
+use std::collections::VecDeque;
+
+use anyhow::Result;
+
 use futuresdr::macros::async_trait;
 use futuresdr::macros::message_handler;
 use futuresdr::num_complex::Complex32;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
@@ -11,10 +13,12 @@ use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 use futuresdr::tracing::warn;
-use std::collections::VecDeque;
 
+use crate::utils::CodeRate;
+use crate::utils::SpreadingFactor;
 use crate::Encoder;
 use crate::Modulator;
 
@@ -30,17 +34,17 @@ pub struct Transmitter {
 impl Transmitter {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        code_rate: u8,
+        code_rate: CodeRate,
         has_crc: bool,
-        spreading_factor: u8,
+        spreading_factor: SpreadingFactor,
         low_data_rate: bool,
         implicit_header: bool,
         oversampling: usize,
         sync_words: Vec<usize>,
         preamble_len: usize,
         pad: usize,
-    ) -> Block {
-        Block::new(
+    ) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Transmitter").build(),
             StreamIoBuilder::new()
                 .add_output::<Complex32>("out")
@@ -61,7 +65,7 @@ impl Transmitter {
                     implicit_header,
                 ),
                 modulator: Modulator::new(
-                    spreading_factor.into(),
+                    spreading_factor,
                     oversampling,
                     sync_words,
                     preamble_len,
@@ -124,12 +128,17 @@ impl Kernel for Transmitter {
             );
         }
 
-        if out.len() > n {
-            io.call_again = true;
-        }
-
         self.current_offset += n;
         sio.output(0).produce(n);
+
+        if self.current_offset == self.current_frame.len()
+            && self.frames.is_empty()
+            && self.finished
+        {
+            io.finished = true;
+        } else if out.len() > n {
+            io.call_again = true;
+        }
 
         Ok(())
     }

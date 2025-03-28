@@ -1,13 +1,13 @@
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::ItemTag;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Apply a function on each input sample to create an iterator and output its values.
@@ -34,8 +34,8 @@ where
     ///
     /// ## Parameter
     /// - `f`: Function to create an interator from an input sample
-    pub fn new(f: F) -> Block {
-        Block::new(
+    pub fn new(f: F) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("ApplyIntoIter").build(),
             StreamIoBuilder::new()
                 .add_input::<A>("in")

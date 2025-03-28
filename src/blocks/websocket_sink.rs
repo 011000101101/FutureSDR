@@ -3,25 +3,29 @@ use async_tungstenite::tungstenite::Message;
 use async_tungstenite::WebSocketStream;
 use futures::future;
 use futures::future::Either;
-use futures::sink::{Sink, SinkExt};
+use futures::sink::Sink;
+use futures::sink::SinkExt;
 use futures::Stream;
 use std::marker::PhantomData;
 use std::mem::size_of;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::SocketAddr;
+use std::net::TcpListener;
+use std::net::TcpStream;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
 
-use crate::anyhow::Context as _;
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
+use crate::runtime::Error;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Operation mode for [WebsocketSink].
@@ -45,8 +49,8 @@ pub struct WebsocketSink<T> {
 
 impl<T: Send + Sync + 'static> WebsocketSink<T> {
     /// Create WebsocketSink block
-    pub fn new(port: u32, mode: WebsocketSinkMode) -> Block {
-        Block::new(
+    pub fn new(port: u32, mode: WebsocketSinkMode) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("WebsocketSink").build(),
             StreamIoBuilder::new().add_input::<T>("in").build(),
             MessageIoBuilder::<Self>::new().build(),
@@ -111,7 +115,12 @@ impl<T: Send + Sync + 'static> Kernel for WebsocketSink<T> {
             }
 
             if !v.is_empty() {
-                let acc = Box::pin(self.listener.as_ref().context("no listener")?.accept());
+                let acc = Box::pin(
+                    self.listener
+                        .as_ref()
+                        .ok_or_else(|| Error::RuntimeError("no listener".to_string()))?
+                        .accept(),
+                );
                 let send = conn.send(Message::Binary(v));
 
                 match future::select(acc, send).await {
@@ -133,7 +142,7 @@ impl<T: Send + Sync + 'static> Kernel for WebsocketSink<T> {
         } else if let Ok((stream, socket)) = self
             .listener
             .as_ref()
-            .context("no listener")?
+            .ok_or_else(|| Error::RuntimeError("no listener".to_string()))?
             .get_ref()
             .accept()
         {
@@ -195,7 +204,7 @@ impl<T: Send + Sync + 'static> WebsocketSinkBuilder<T> {
     }
 
     /// Build WebsocketSink
-    pub fn build(self) -> Block {
+    pub fn build(self) -> TypedBlock<WebsocketSink<T>> {
         WebsocketSink::<T>::new(self.port, self.mode)
     }
 }

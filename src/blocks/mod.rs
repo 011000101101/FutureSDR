@@ -35,6 +35,7 @@
 //! | [ConsoleSink] | Log stream data with [log::info!]. | ✅ |
 //! | [Delay] | Delays samples. | ✅ |
 //! | [Head] | Copies only a given number of samples and stops. | ✅ |
+//! ! [MovingAvg] | Applies an exponential moving average over a window samples. | ✅ |
 //! | [NullSink] | Drops samples. | ✅ |
 //! | [NullSource] | Generates a stream of zeros. | ✅ |
 //! | [Selector] | Forward the input stream with a given index to the output stream with a given index. | ✅ |
@@ -47,6 +48,7 @@
 //! | Block | Usage | WebAssembly? |
 //! |---|---|---|
 //! | [MessageAnnotator] | Wrap every message in a DictStrPmt and add fixed additional fields, to facilitate multiplexing w/o losing the source association | ✅ |
+//! | [MessageApply] | Apply a function to each message, emitting the result as a new message. | ✅ |
 //! | [MessageBurst] | Output a given number of messages in one burst and terminate. | ✅ |
 //! | [MessageCopy] | Forward messages. | ✅ |
 //! | [MessagePipe] | Push received messages into a channel. | ✅ |
@@ -58,8 +60,8 @@
 //! |---|---|---|---|
 //! | [struct@Copy] | Copy input samples to the output. | ✅ | |
 //! | [CopyRand] | Copy input samples to the output, forwarding only a randomly selected number of samples. | ❌ | |
-//! | lttng::NullSource | Null source that calls an [lttng](https://lttng.org/) tracepoint for every batch of produced samples. | ❌ | lttng |
-//! | lttng:NullSink | Null sink that calls an [lttng](https://lttng.org/) tracepoint for every batch of received samples. | ❌ | lttng |
+//! | [lttng::NullSource] | Null source that calls an [lttng](https://lttng.org/) tracepoint for every batch of produced samples. | ❌ | lttng |
+//! | [lttng:NullSink] | Null sink that calls an [lttng](https://lttng.org/) tracepoint for every batch of received samples. | ❌ | lttng |
 //!
 //! ## I/O
 //! | Block | Usage | WebAssembly? |
@@ -111,152 +113,163 @@
 //! | [WavSink](audio::WavSink) | Writes samples to a WAV file | ❌ |
 //!
 
-pub use apply::Apply;
-pub use applyintoiter::ApplyIntoIter;
-pub use applynm::ApplyNM;
-#[cfg(not(target_arch = "wasm32"))]
-pub use blob_to_udp::BlobToUdp;
-pub use channel_sink::ChannelSink;
-pub use channel_source::ChannelSource;
-pub use combine::Combine;
-pub use console_sink::ConsoleSink;
-pub use copy::Copy;
-pub use copy_rand::{CopyRand, CopyRandBuilder};
-pub use delay::Delay;
-pub use fft::Fft;
-pub use fft::FftDirection;
-#[cfg(not(target_arch = "wasm32"))]
-pub use file_sink::FileSink;
-#[cfg(not(target_arch = "wasm32"))]
-pub use file_source::FileSource;
-pub use filter::Filter;
-pub use finite_source::FiniteSource;
-pub use fir::Fir;
-pub use fir::FirBuilder;
-pub use head::Head;
-pub use iir::{Iir, IirBuilder};
-pub use message_annotator::MessageAnnotator;
-pub use message_burst::MessageBurst;
-pub use message_copy::MessageCopy;
-pub use message_pipe::MessagePipe;
-pub use message_sink::MessageSink;
-#[cfg(not(target_arch = "wasm32"))]
-pub use message_source::{MessageSource, MessageSourceBuilder};
-pub use null_sink::NullSink;
-pub use null_source::NullSource;
-pub use pfb::arb_resampler::PfbArbResampler;
-pub use pfb::channelizer::PfbChannelizer;
-pub use pfb::synthesizer::PfbSynthesizer;
-pub use selector::DropPolicy as SelectorDropPolicy;
-pub use selector::Selector;
-pub use signal_source::FixedPointPhase;
-pub use signal_source::SignalSourceBuilder;
-pub use sink::Sink;
-pub use source::Source;
-pub use split::Split;
-pub use stream_deinterleaver::StreamDeinterleaver;
-pub use stream_duplicator::StreamDuplicator;
-pub use tag_debug::TagDebug;
-#[cfg(not(target_arch = "wasm32"))]
-pub use tcp_sink::TcpSink;
-#[cfg(not(target_arch = "wasm32"))]
-pub use tcp_source::TcpSource;
-pub use throttle::Throttle;
-#[cfg(not(target_arch = "wasm32"))]
-pub use udp_source::UdpSource;
-pub use vector_sink::{VectorSink, VectorSinkBuilder};
-pub use vector_source::VectorSource;
-#[cfg(feature = "vulkan")]
-pub use vulkan::{Vulkan, VulkanBuilder};
-#[cfg(not(target_arch = "wasm32"))]
-pub use websocket_pmt_sink::WebsocketPmtSink;
-#[cfg(not(target_arch = "wasm32"))]
-pub use websocket_sink::{WebsocketSink, WebsocketSinkBuilder, WebsocketSinkMode};
-pub use xlating_fir::XlatingFir;
-pub use xlating_fir::XlatingFirBuilder;
-#[cfg(feature = "zynq")]
-pub use zynq::Zynq;
-#[cfg(feature = "zynq")]
-pub use zynq_sync::ZynqSync;
-
-#[cfg(feature = "wgpu")]
-pub use self::wgpu::Wgpu;
-
 mod apply;
+pub use apply::Apply;
 mod applyintoiter;
+pub use applyintoiter::ApplyIntoIter;
 mod applynm;
+pub use applynm::ApplyNM;
 pub mod audio;
-
 #[cfg(not(target_arch = "wasm32"))]
 mod blob_to_udp;
+#[cfg(not(target_arch = "wasm32"))]
+pub use blob_to_udp::BlobToUdp;
 mod channel_sink;
+pub use channel_sink::ChannelSink;
 mod channel_source;
+pub use channel_source::ChannelSource;
 mod combine;
+pub use combine::Combine;
 mod console_sink;
+pub use console_sink::ConsoleSink;
 mod copy;
+pub use copy::Copy;
 mod copy_rand;
+pub use copy_rand::CopyRand;
+pub use copy_rand::CopyRandBuilder;
 mod delay;
+pub use delay::Delay;
 mod fft;
+pub use fft::Fft;
+pub use fft::FftDirection;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod file_sink;
 #[cfg(not(target_arch = "wasm32"))]
+pub use file_sink::FileSink;
+#[cfg(not(target_arch = "wasm32"))]
 mod file_source;
+#[cfg(not(target_arch = "wasm32"))]
+pub use file_source::FileSource;
 mod filter;
+pub use filter::Filter;
 mod finite_source;
+pub use finite_source::FiniteSource;
 mod fir;
+pub use fir::Fir;
+pub use fir::FirBuilder;
 mod head;
+pub use head::Head;
 mod iir;
-#[cfg(feature = "lttng")]
+pub use iir::Iir;
+pub use iir::IirBuilder;
+#[cfg(all(feature = "lttng", target_os = "linux"))]
 pub mod lttng;
 
 mod message_annotator;
+pub use message_annotator::MessageAnnotator;
+mod message_apply;
+pub use message_apply::MessageApply;
 mod message_burst;
+pub use message_burst::MessageBurst;
 mod message_copy;
+pub use message_copy::MessageCopy;
 mod message_pipe;
+pub use message_pipe::MessagePipe;
 mod message_sink;
+pub use message_sink::MessageSink;
 #[cfg(not(target_arch = "wasm32"))]
 mod message_source;
+#[cfg(not(target_arch = "wasm32"))]
+pub use message_source::MessageSource;
+#[cfg(not(target_arch = "wasm32"))]
+pub use message_source::MessageSourceBuilder;
+mod moving_avg;
+pub use moving_avg::MovingAvg;
 mod null_sink;
+pub use null_sink::NullSink;
 mod null_source;
+pub use null_source::NullSource;
 mod pfb;
+pub use pfb::arb_resampler::PfbArbResampler;
+pub use pfb::channelizer::PfbChannelizer;
+pub use pfb::synthesizer::PfbSynthesizer;
 /// Seify hardware driver blocks
 #[cfg(feature = "seify")]
 pub mod seify;
-
 mod selector;
+pub use selector::DropPolicy as SelectorDropPolicy;
+pub use selector::Selector;
 pub mod signal_source;
+pub use signal_source::FixedPointPhase;
+pub use signal_source::SignalSourceBuilder;
 mod sink;
+pub use sink::Sink;
 mod source;
+pub use source::Source;
 mod split;
+pub use split::Split;
 mod stream_deinterleaver;
+pub use stream_deinterleaver::StreamDeinterleaver;
 mod stream_duplicator;
+pub use stream_duplicator::StreamDuplicator;
 mod tag_debug;
+pub use tag_debug::TagDebug;
 #[cfg(not(target_arch = "wasm32"))]
 mod tcp_sink;
 #[cfg(not(target_arch = "wasm32"))]
+pub use tcp_sink::TcpSink;
+#[cfg(not(target_arch = "wasm32"))]
 mod tcp_source;
+#[cfg(not(target_arch = "wasm32"))]
+pub use tcp_source::TcpSource;
 mod throttle;
+pub use throttle::Throttle;
 #[cfg(not(target_arch = "wasm32"))]
 mod udp_source;
+#[cfg(not(target_arch = "wasm32"))]
+pub use udp_source::UdpSource;
 mod vector_sink;
+pub use vector_sink::VectorSink;
+pub use vector_sink::VectorSinkBuilder;
 mod vector_source;
+pub use vector_source::VectorSource;
 #[cfg(feature = "vulkan")]
 mod vulkan;
+#[cfg(feature = "vulkan")]
+pub use vulkan::Vulkan;
+#[cfg(feature = "vulkan")]
+pub use vulkan::VulkanBuilder;
 /// WASM-specfici blocks (target wasm32-unknown-unknown)
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
-
 #[cfg(not(target_arch = "wasm32"))]
 mod websocket_pmt_sink;
 #[cfg(not(target_arch = "wasm32"))]
+pub use websocket_pmt_sink::WebsocketPmtSink;
+#[cfg(not(target_arch = "wasm32"))]
 mod websocket_sink;
+#[cfg(not(target_arch = "wasm32"))]
+pub use websocket_sink::WebsocketSink;
+#[cfg(not(target_arch = "wasm32"))]
+pub use websocket_sink::WebsocketSinkBuilder;
+#[cfg(not(target_arch = "wasm32"))]
+pub use websocket_sink::WebsocketSinkMode;
+pub mod xlating_fir;
+pub use xlating_fir::XlatingFir;
+pub use xlating_fir::XlatingFirBuilder;
 #[cfg(feature = "wgpu")]
 mod wgpu;
-pub mod xlating_fir;
+#[cfg(feature = "wgpu")]
+pub use self::wgpu::Wgpu;
 #[cfg(feature = "zeromq")]
 pub mod zeromq;
-
 #[cfg(feature = "zynq")]
 mod zynq;
 #[cfg(feature = "zynq")]
+pub use zynq::Zynq;
+#[cfg(feature = "zynq")]
 mod zynq_sync;
+
+#[cfg(feature = "zynq")]
+pub use zynq_sync::ZynqSync;

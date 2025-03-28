@@ -163,7 +163,7 @@ jobs:
         run: sudo apt-get -y install libsoapysdr-dev
 
       - name: Run cargo clippy (main)
-        run: cargo clippy --all-targets --workspace --features=aaronia_http,vulkan,zeromq,audio,flow_scheduler,tpb_scheduler,soapy,lttng,zynq,wgpu -- -D warnings
+        run: cargo clippy --all-targets --workspace --features=aaronia_http,vulkan,zeromq,audio,flow_scheduler,tpb_scheduler,seify_dummy,soapy,lttng,zynq,wgpu -- -D warnings
 
       - name: Run cargo clippy (futuredsp)
         run: cargo clippy --lib --manifest-path=crates/futuredsp/Cargo.toml -- -D warnings
@@ -254,6 +254,9 @@ jobs:
 
       - name: Install alsalibs
         run: sudo apt-get -y install libasound2-dev
+
+      - name: Install libdbus-dev
+        run: sudo apt-get -y install libdbus-1-dev
 
       - name: Install LTTng
         run: sudo apt-get -y install liblttng-ust-dev
@@ -348,7 +351,7 @@ jobs:
           target: wasm32-unknown-unknown
 
       - name: Run cargo clippy for wasm32-unknown-unknown (main)
-        run: cargo clippy --lib --workspace --features=audio,wgpu --target wasm32-unknown-unknown -- -D warnings
+        run: cargo clippy --lib --workspace --features=audio,seify_dummy,wgpu --target wasm32-unknown-unknown -- -D warnings
 
       - name: Run cargo clippy for wasm32-unknown-unknown (prophecy)
         run: cargo clippy --lib --manifest-path=crates/prophecy/Cargo.toml --target wasm32-unknown-unknown -- -D warnings
@@ -387,9 +390,11 @@ jobs:
       - run: sudo apt-get -y install libasound2-dev
       - run: sudo apt-get -y install liblttng-ust-dev
       - run: sudo apt-get -y install libsoapysdr-dev
-      - run: cargo test --all-targets --workspace --features=aaronia_http,rtlsdr,zeromq,audio,flow_scheduler,tpb_scheduler,soapy,lttng,zynq,wgpu
+      - run: cargo test --all-targets --workspace --features=aaronia_http,rtlsdr,zeromq,audio,flow_scheduler,tpb_scheduler,seify_dummy,soapy,lttng,zynq,wgpu
       - run: cargo test --all-targets --manifest-path=crates/futuredsp/Cargo.toml
+      - run: cargo test --all-targets --all-features --manifest-path=crates/types/Cargo.toml
       - run: cargo test --all-targets --manifest-path=crates/remote/Cargo.toml
+      - run: cargo test --all-targets --manifest-path=examples/wlan/Cargo.toml
 
   test-macos:
     name: Unit Tests macOS
@@ -399,7 +404,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-      - run: cargo test --all-targets --workspace --features=aaronia_http,flow_scheduler,tpb_scheduler,wgpu
+      - run: cargo test --all-targets --workspace --features=aaronia_http,flow_scheduler,seify_dummy,tpb_scheduler,wgpu
 
   test-windows:
     name: Unit Test Windows
@@ -412,4 +417,4 @@ jobs:
           args: install ninja
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-      - run: cargo test --all-targets --workspace --features=aaronia_http,flow_scheduler,tpb_scheduler,wgpu
+      - run: cargo test --all-targets --workspace --features=aaronia_http,flow_scheduler,seify_dummy,tpb_scheduler,wgpu

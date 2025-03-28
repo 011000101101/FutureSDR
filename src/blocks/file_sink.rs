@@ -2,15 +2,15 @@ use async_fs::File;
 use futures::io::AsyncWriteExt;
 use std::fs::OpenOptions;
 
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Write samples to a file.
@@ -46,8 +46,8 @@ pub struct FileSink<T: Send + 'static> {
 
 impl<T: Send + 'static> FileSink<T> {
     /// Create FileSink block
-    pub fn new<S: Into<String>>(file_name: S) -> Block {
-        Block::new(
+    pub fn new<S: Into<String>>(file_name: S) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("FileSink").build(),
             StreamIoBuilder::new().add_input::<T>("in").build(),
             MessageIoBuilder::new().build(),
@@ -101,8 +101,7 @@ impl<T: Send + 'static> Kernel for FileSink<T> {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(self.file_name.clone())
-            .unwrap();
+            .open(&self.file_name)?;
 
         self.file = Some(file.into());
         Ok(())
@@ -114,7 +113,7 @@ impl<T: Send + 'static> Kernel for FileSink<T> {
         _mio: &mut MessageIo<Self>,
         _meta: &mut BlockMeta,
     ) -> Result<()> {
-        self.file.as_mut().unwrap().sync_all().await.unwrap();
+        self.file.as_mut().unwrap().sync_all().await?;
         Ok(())
     }
 }

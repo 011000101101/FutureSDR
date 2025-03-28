@@ -1,18 +1,19 @@
+use anyhow::anyhow;
 use std::cmp;
 use std::fmt;
 use std::ptr;
 use std::str::FromStr;
 
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
 use crate::runtime::Pmt;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Drop Policy for [`Selector`] block
@@ -84,7 +85,7 @@ where
     A: Send + 'static + Copy,
 {
     /// Create Selector block
-    pub fn new(drop_policy: DropPolicy) -> Block {
+    pub fn new(drop_policy: DropPolicy) -> TypedBlock<Self> {
         let mut stream_builder = StreamIoBuilder::new();
         for i in 0..N {
             stream_builder = stream_builder.add_input::<A>(format!("in{i}").as_str());
@@ -92,7 +93,7 @@ where
         for i in 0..M {
             stream_builder = stream_builder.add_output::<A>(format!("out{i}").as_str());
         }
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new(format!("Selector<{N}, {M}>")).build(),
             stream_builder.build(),
             MessageIoBuilder::<Self>::new()
@@ -108,6 +109,16 @@ where
         )
     }
 
+    fn pmt_to_index(p: &Pmt) -> Result<Option<usize>> {
+        match p {
+            Pmt::U32(v) => Ok(Some(*v as usize % N)),
+            Pmt::U64(v) => Ok(Some(*v as usize % N)),
+            Pmt::Usize(v) => Ok(Some(*v % N)),
+            Pmt::Finished | Pmt::Ok => Ok(None),
+            o => Err(anyhow!("Invalid index specification: {:?}", o)),
+        }
+    }
+
     #[message_handler]
     async fn input_index(
         &mut self,
@@ -116,10 +127,8 @@ where
         _meta: &mut BlockMeta,
         p: Pmt,
     ) -> Result<Pmt> {
-        match p {
-            Pmt::U32(v) => self.input_index = (v as usize) % N,
-            Pmt::U64(v) => self.input_index = (v as usize) % N,
-            _ => todo!(),
+        if let Some(i) = Self::pmt_to_index(&p)? {
+            self.input_index = i;
         }
         Ok(Pmt::U32(self.input_index as u32))
     }
@@ -132,10 +141,8 @@ where
         _meta: &mut BlockMeta,
         p: Pmt,
     ) -> Result<Pmt> {
-        match p {
-            Pmt::U32(v) => self.output_index = (v as usize) % M,
-            Pmt::U64(v) => self.output_index = (v as usize) % M,
-            _ => todo!(),
+        if let Some(i) = Self::pmt_to_index(&p)? {
+            self.output_index = i;
         }
         Ok(Pmt::U32(self.output_index as u32))
     }

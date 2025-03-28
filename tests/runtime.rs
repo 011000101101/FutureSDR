@@ -1,6 +1,4 @@
-use std::iter::repeat_with;
-
-use futuresdr::anyhow::Result;
+use anyhow::Result;
 use futuresdr::async_io::block_on;
 use futuresdr::blocks::Copy;
 use futuresdr::blocks::Head;
@@ -12,6 +10,7 @@ use futuresdr::blocks::VectorSinkBuilder;
 use futuresdr::blocks::VectorSource;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
+use std::iter::repeat_with;
 
 #[test]
 fn flowgraph() -> Result<()> {
@@ -22,10 +21,10 @@ fn flowgraph() -> Result<()> {
     let null_source = NullSource::<f32>::new();
     let vect_sink = VectorSinkBuilder::<f32>::new().build();
 
-    let copy = fg.add_block(copy);
-    let head = fg.add_block(head);
-    let null_source = fg.add_block(null_source);
-    let vect_sink = fg.add_block(vect_sink);
+    let copy = fg.add_block(copy)?;
+    let head = fg.add_block(head)?;
+    let null_source = fg.add_block(null_source)?;
+    let vect_sink = fg.add_block(vect_sink)?;
 
     fg.connect_stream(null_source, "out", head, "in")?;
     fg.connect_stream(head, "out", copy, "in")?;
@@ -60,9 +59,9 @@ fn fg_terminate() -> Result<()> {
     let throttle = Throttle::<f32>::new(10.0);
     let null_sink = NullSink::<f32>::new();
 
-    let null_source = fg.add_block(null_source);
-    let throttle = fg.add_block(throttle);
-    let null_sink = fg.add_block(null_sink);
+    let null_source = fg.add_block(null_source)?;
+    let throttle = fg.add_block(throttle)?;
+    let null_sink = fg.add_block(null_sink)?;
 
     fg.connect_stream(null_source, "out", throttle, "in")?;
     fg.connect_stream(throttle, "out", null_sink, "in")?;
@@ -89,9 +88,9 @@ fn fg_rand_vec() -> Result<()> {
     let copy = Copy::<f32>::new();
     let snk = VectorSinkBuilder::<f32>::new().build();
 
-    let src = fg.add_block(src);
-    let copy = fg.add_block(copy);
-    let snk = fg.add_block(snk);
+    let src = fg.add_block(src)?;
+    let copy = fg.add_block(copy)?;
+    let snk = fg.add_block(snk)?;
 
     fg.connect_stream(src, "out", copy, "in")?;
     fg.connect_stream(copy, "out", snk, "in")?;
@@ -119,15 +118,15 @@ fn fg_rand_vec_multi_snk() -> Result<()> {
 
     let src = VectorSource::<f32>::new(orig.clone());
     let copy = Copy::<f32>::new();
-    let src = fg.add_block(src);
-    let copy = fg.add_block(copy);
+    let src = fg.add_block(src)?;
+    let copy = fg.add_block(copy)?;
 
     fg.connect_stream(src, "out", copy, "in")?;
 
     let mut snks = Vec::new();
     for _ in 0..n_snks {
         let snk = VectorSinkBuilder::<f32>::new().build();
-        let snk = fg.add_block(snk);
+        let snk = fg.add_block(snk)?;
         snks.push(snk);
         fg.connect_stream(copy, "out", snk, "in")?;
     }

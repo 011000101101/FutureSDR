@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::ItemTag;
@@ -10,13 +8,15 @@ use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 use futuresdr::tracing::warn;
 
-use crate::utilities::*;
+use crate::utils::*;
 
 pub struct Deinterleaver {
     sf: usize,           // Spreading factor
@@ -27,7 +27,7 @@ pub struct Deinterleaver {
 }
 
 impl Deinterleaver {
-    pub fn new(soft_decoding: bool) -> Block {
+    pub fn new(soft_decoding: bool, ldro: bool, sf: SpreadingFactor) -> TypedBlock<Self> {
         let mut sio = StreamIoBuilder::new();
         if soft_decoding {
             sio = sio.add_input::<[LLR; MAX_SF]>("in");
@@ -36,16 +36,16 @@ impl Deinterleaver {
             sio = sio.add_input::<u16>("in");
             sio = sio.add_output::<u8>("out");
         }
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("Deinterleaver").build(),
             sio.build(),
             MessageIoBuilder::new().build(),
             Deinterleaver {
                 soft_decoding,
-                sf: 0,
+                sf: Into::<usize>::into(sf),
                 cr: 0,
                 is_header: false,
-                ldro: false,
+                ldro,
             },
         )
     }
@@ -152,7 +152,7 @@ impl Kernel for Deinterleaver {
                 && ((self.sf >= 7 && (self.is_header || self.ldro))
                     || (self.sf < 7 && !self.is_header && self.ldro)))
         {
-            self.sf - 2
+            self.sf - 2 // TODO this can be called w/o ever receiving a header tag, causing overflow if sf is not set explicitly in initializer
         } else {
             self.sf
         };
@@ -188,6 +188,13 @@ impl Kernel for Deinterleaver {
                 // Do the actual deinterleaving
                 for i in 0..cw_len {
                     for j in 0..sf_app {
+                        if my_modulo(i as isize - j as isize - 1, sf_app) >= sf_app || i >= 8 {
+                            panic!(
+                                "sf_app: {sf_app}, modulo: {}, i: {i}, self.cr: {}",
+                                my_modulo(i as isize - j as isize - 1, sf_app),
+                                self.cr
+                            );
+                        }
                         deinter_bin[my_modulo(i as isize - j as isize - 1, sf_app)][i] =
                             inter_bin[i][j];
                     }

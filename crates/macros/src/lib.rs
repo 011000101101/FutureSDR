@@ -32,12 +32,12 @@ use std::iter::Peekable;
 ///
 /// ```ignore
 /// // Add all the blocks to the `Flowgraph`...
-/// let src = fg.add_block(src);
-/// let shift = fg.add_block(shift);
-/// let resamp1 = fg.add_block(resamp1);
-/// let demod = fg.add_block(demod);
-/// let resamp2 = fg.add_block(resamp2);
-/// let snk = fg.add_block(snk);
+/// let src = fg.add_block(src)?;
+/// let shift = fg.add_block(shift)?;
+/// let resamp1 = fg.add_block(resamp1)?;
+/// let demod = fg.add_block(demod)?;
+/// let resamp2 = fg.add_block(resamp2)?;
+/// let snk = fg.add_block(snk)?;
 ///
 /// // ... and connect the ports appropriately
 /// fg.connect_stream(src, "out", shift, "in")?;
@@ -75,7 +75,7 @@ use std::iter::Peekable;
 /// );
 /// ```
 ///
-/// Custom bufers for stream connections can be added by subsituding `>` with `[...]`
+/// Custom buffers for stream connections can be added by substituting `>` with `[...]`
 /// notation, e.g.:
 ///
 /// ```ignore
@@ -163,19 +163,28 @@ pub fn connect(attr: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     out.extend(quote! {
         use futuresdr::runtime::Block;
+        use futuresdr::runtime::Error;
         use futuresdr::runtime::Flowgraph;
+        use futuresdr::runtime::Kernel;
+        use futuresdr::runtime::TypedBlock;
+        use std::result::Result;
 
-        struct Foo;
+        struct FgOp;
         trait Add<T> {
-            fn add(fg: &mut Flowgraph, b: T) -> usize;
+            fn add(fg: &mut Flowgraph, b: T) -> Result<usize, Error>;
         }
-        impl Add<usize> for Foo {
-            fn add(_fg: &mut Flowgraph, b: usize) -> usize {
-                b
+        impl Add<usize> for FgOp {
+            fn add(_fg: &mut Flowgraph, b: usize) -> Result<usize, Error> {
+                Ok(b)
             }
         }
-        impl Add<Block> for Foo {
-            fn add(fg: &mut Flowgraph, b: Block) -> usize {
+        impl Add<Block> for FgOp {
+            fn add(fg: &mut Flowgraph, b: Block) -> Result<usize, Error> {
+                fg.add_block(b)
+            }
+        }
+        impl<T: Kernel + 'static> Add<TypedBlock<T>> for FgOp {
+            fn add(fg: &mut Flowgraph, b: TypedBlock<T>) -> Result<usize, Error> {
                 fg.add_block(b)
             }
         }
@@ -185,7 +194,7 @@ pub fn connect(attr: proc_macro::TokenStream) -> proc_macro::TokenStream {
     for blk_id in blocks.clone() {
         out.extend(quote! {
             #[allow(unused_variables)]
-            let #blk_id = Foo::add(#fg.as_mut(), #blk_id);
+            let #blk_id = FgOp::add(#fg.as_mut(), #blk_id)?;
         });
     }
     // Stream connections
@@ -549,7 +558,7 @@ pub fn message_handler(
             #mio: &'a mut MessageIo<Self>,
             #meta: &'a mut BlockMeta,
             #pmt: Pmt,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Pmt>> + Send + 'a>> {
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::runtime::Result<Pmt>> + Send + 'a>> {
             use crate::futures::FutureExt;
             Box::pin(async move {
                 #(#body)*
@@ -562,7 +571,7 @@ pub fn message_handler(
             #mio: &'a mut MessageIo<Self>,
             #meta: &'a mut BlockMeta,
             #pmt: Pmt,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Pmt>> + 'a>> {
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::runtime::Result<Pmt>> + 'a>> {
             use crate::futures::FutureExt;
             Box::pin(async move {
                 #(#body)*
@@ -639,7 +648,7 @@ pub fn message_handler_external(
             #mio: &'a mut MessageIo<Self>,
             #meta: &'a mut BlockMeta,
             #pmt: Pmt,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Pmt>> + Send + 'a>> {
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = futuresdr::runtime::Result<Pmt>> + Send + 'a>> {
             use futuresdr::futures::FutureExt;
             Box::pin(async move {
                 #(#body)*
@@ -652,7 +661,7 @@ pub fn message_handler_external(
             #mio: &'a mut MessageIo<Self>,
             #meta: &'a mut BlockMeta,
             #pmt: Pmt,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Pmt>> + 'a>> {
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = futuresdr::runtime::Result<Pmt>> + 'a>> {
             use futuresdr::futures::FutureExt;
             Box::pin(async move {
                 #(#body)*

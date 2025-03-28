@@ -1,8 +1,5 @@
+use anyhow::Result;
 use clap::Parser;
-use futuresdr::futures::channel::mpsc;
-use futuresdr::futures::StreamExt;
-
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::Apply;
 use futuresdr::blocks::Combine;
 use futuresdr::blocks::Delay;
@@ -10,13 +7,16 @@ use futuresdr::blocks::Fft;
 use futuresdr::blocks::MessagePipe;
 use futuresdr::blocks::UdpSource;
 use futuresdr::blocks::WebsocketPmtSink;
+use futuresdr::futures::channel::mpsc;
+use futuresdr::futures::StreamExt;
 use futuresdr::macros::connect;
 use futuresdr::num_complex::Complex32;
+use futuresdr::runtime::copy_tag_propagation;
+use futuresdr::runtime::BlockT;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
 
-use wlan::fft_tag_propagation;
 use wlan::Decoder;
 use wlan::FrameEqualizer;
 use wlan::MovingAverage;
@@ -64,7 +64,7 @@ fn main() -> Result<()> {
     connect!(fg, sync_short > sync_long);
 
     let mut fft = Fft::new(64);
-    fft.set_tag_propagation(Box::new(fft_tag_propagation));
+    fft.set_tag_propagation(Box::new(copy_tag_propagation));
     let frame_equalizer = FrameEqualizer::new();
     let decoder = Decoder::new();
     let symbol_sink = WebsocketPmtSink::new(9002);

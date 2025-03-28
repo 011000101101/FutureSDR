@@ -1,20 +1,21 @@
-use std::collections::VecDeque;
-
-use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
 use futuresdr::macros::message_handler;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
-use futuresdr::tracing::{debug, info, warn};
+use futuresdr::tracing::debug;
+use futuresdr::tracing::info;
+use futuresdr::tracing::warn;
+use std::collections::VecDeque;
 
 const MAX_FRAMES: usize = 128;
 const MAX_FRAME_SIZE: usize = 127;
@@ -34,7 +35,7 @@ pub struct Mac {
 }
 
 impl Mac {
-    pub fn new() -> Block {
+    pub fn new() -> TypedBlock<Self> {
         let mut b = [0; 256];
         b[0] = 0x0;
         b[1] = 0x0;
@@ -51,7 +52,7 @@ impl Mac {
         b[12] = SOURCE_ADDRESS.to_le_bytes()[0];
         b[13] = SOURCE_ADDRESS.to_le_bytes()[1];
 
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("Mac").build(),
             StreamIoBuilder::new().add_output::<u8>("out").build(),
             MessageIoBuilder::new()

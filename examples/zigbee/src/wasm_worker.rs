@@ -1,4 +1,4 @@
-use futuresdr::anyhow::Result;
+use anyhow::Result;
 use futuresdr::blocks::wasm::HackRf;
 use futuresdr::blocks::Apply;
 use futuresdr::blocks::MessagePipe;
@@ -14,7 +14,8 @@ use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::FlowgraphHandle;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
-use gloo_worker::{HandlerId, WorkerScope};
+use gloo_worker::HandlerId;
+use gloo_worker::WorkerScope;
 
 use crate::ClockRecoveryMm;
 use crate::Decoder;

@@ -1,12 +1,11 @@
-use std::time;
-
-use futuresdr::anyhow::Result;
+use anyhow::Result;
 use futuresdr::blocks::MessageCopy;
 use futuresdr::blocks::MessageSink;
 use futuresdr::blocks::MessageSourceBuilder;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
+use std::time;
 
 fn main() -> Result<()> {
     let mut fg = Flowgraph::new();
@@ -20,9 +19,9 @@ fn main() -> Result<()> {
     let msg_copy = MessageCopy::new();
     let msg_sink = MessageSink::new();
 
-    let msg_copy = fg.add_block(msg_copy);
-    let msg_source = fg.add_block(msg_source);
-    let msg_sink = fg.add_block(msg_sink);
+    let msg_copy = fg.add_block(msg_copy)?;
+    let msg_source = fg.add_block(msg_source)?;
+    let msg_sink = fg.add_block(msg_sink)?;
 
     fg.connect_message(msg_source, "out", msg_copy, "in")?;
     fg.connect_message(msg_copy, "out", msg_sink, "in")?;

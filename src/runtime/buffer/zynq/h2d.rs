@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;

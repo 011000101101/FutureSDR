@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
-use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
 use futuresdr::macros::message_handler;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
@@ -11,17 +9,18 @@ use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 use futuresdr::tracing::info;
 
-use crate::utilities::*;
+use crate::utils::*;
 use crate::Frame;
 
 pub struct Decoder;
 
 impl Decoder {
-    pub fn new() -> Block {
-        Block::new(
+    pub fn new() -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Decoder").build(),
             StreamIoBuilder::new().build(),
             MessageIoBuilder::new()
@@ -125,9 +124,10 @@ impl Decoder {
 
             // let data = String::from_utf8_lossy(&dewhitened[..dewhitened.len() - 2]);
             // info!("received frame: {}", data);
-            info!("received frame [bin]: {:02x?}", &dewhitened);
+            info!("DECODER received frame [bin]: {:02x?}", &dewhitened);
             Some(dewhitened)
         } else {
+            info!("DECODER FAILED frame [bin]: {:02x?}", &dewhitened);
             None
         }
     }

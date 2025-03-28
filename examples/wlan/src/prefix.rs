@@ -1,16 +1,16 @@
-use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
 use futuresdr::num_complex::Complex32;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::ItemTag;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 
 pub struct Prefix {
@@ -19,8 +19,8 @@ pub struct Prefix {
 }
 
 impl Prefix {
-    pub fn new(pad_front: usize, pad_tail: usize) -> Block {
-        Block::new(
+    pub fn new(pad_front: usize, pad_tail: usize) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("Prefix").build(),
             StreamIoBuilder::new()
                 .add_input::<Complex32>("in")

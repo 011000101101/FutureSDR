@@ -1,12 +1,12 @@
-use crate::anyhow::Result;
-use crate::runtime::Block;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
+use crate::runtime::Result;
 use crate::runtime::StreamIo;
 use crate::runtime::StreamIoBuilder;
+use crate::runtime::TypedBlock;
 use crate::runtime::WorkIo;
 
 /// Read samples from [ZeroMQ](https://zeromq.org/) socket.
@@ -18,8 +18,8 @@ pub struct SubSource<T: Send + 'static> {
 
 impl<T: Send + 'static> SubSource<T> {
     /// Create SubSource block
-    pub fn new(address: impl Into<String>) -> Block {
-        Block::new(
+    pub fn new(address: impl Into<String>) -> TypedBlock<Self> {
+        TypedBlock::new(
             BlockMetaBuilder::new("SubSource").blocking().build(),
             StreamIoBuilder::new().add_output::<T>("out").build(),
             MessageIoBuilder::new().build(),
@@ -93,7 +93,7 @@ impl<T: Send + 'static> SubSourceBuilder<T> {
     }
 
     /// Build ZMQ source
-    pub fn build(self) -> Block {
+    pub fn build(self) -> TypedBlock<SubSource<T>> {
         SubSource::<T>::new(self.address)
     }
 }

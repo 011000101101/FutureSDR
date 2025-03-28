@@ -1,14 +1,14 @@
+use anyhow::Result;
 use clap::Parser;
-
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::audio::AudioSink;
 use futuresdr::blocks::Apply;
 use futuresdr::blocks::FileSource;
 use futuresdr::blocks::FirBuilder;
+use futuresdr::num_complex::Complex32;
 use futuresdr::num_integer::gcd;
+use futuresdr::runtime::BlockT;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
-use num_complex::Complex32;
 
 // Inspired by https://wiki.gnuradio.org/index.php/Simulation_example:_Single_Sideband_transceiver
 
@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     // To be downloaded from https://www.csun.edu/~skatz/katzpage/sdr_project/sdr/ssb_lsb_256k_complex2.dat.zip
     let file_name = args.filename;
     let mut src = FileSource::<Complex32>::new(&file_name, true);
-    src.set_instance_name(format!("File {file_name}"));
+    src.set_instance_name(&format!("File {file_name}"));
 
     const FILE_LEVEL_ADJUSTMENT: f32 = 0.0001;
     let mut osc = Complex32::new(1.0, 0.0);
@@ -67,11 +67,11 @@ fn main() -> Result<()> {
         osc *= shift;
         v * osc * FILE_LEVEL_ADJUSTMENT
     });
-    freq_xlating.set_instance_name(format!("freq_xlating {center_freq}"));
+    freq_xlating.set_instance_name(&format!("freq_xlating {center_freq}"));
 
     let mut low_pass_filter =
         FirBuilder::resampling::<Complex32, Complex32>(audio_rate as usize, file_rate as usize);
-    low_pass_filter.set_instance_name(format!("resampler {audio_rate} {file_rate}"));
+    low_pass_filter.set_instance_name(&format!("resampler {audio_rate} {file_rate}"));
 
     const VOLUME_ADJUSTEMENT: f32 = 0.5;
     const MID_AUDIO_SPECTRUM_FREQ: u32 = 1500;
@@ -90,11 +90,11 @@ fn main() -> Result<()> {
 
     let snk = AudioSink::new(audio_rate, 1);
 
-    let src = fg.add_block(src);
-    let freq_xlating = fg.add_block(freq_xlating);
-    let low_pass_filter = fg.add_block(low_pass_filter);
-    let weaver_ssb_decode = fg.add_block(weaver_ssb_decode);
-    let snk = fg.add_block(snk);
+    let src = fg.add_block(src)?;
+    let freq_xlating = fg.add_block(freq_xlating)?;
+    let low_pass_filter = fg.add_block(low_pass_filter)?;
+    let weaver_ssb_decode = fg.add_block(weaver_ssb_decode)?;
+    let snk = fg.add_block(snk)?;
 
     fg.connect_stream(src, "out", freq_xlating, "in")?;
     fg.connect_stream(freq_xlating, "out", low_pass_filter, "in")?;

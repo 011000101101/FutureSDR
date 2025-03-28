@@ -3,11 +3,9 @@ use std::sync::Arc;
 
 use rustfft::FftPlanner;
 
-use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
 use futuresdr::num_complex::Complex32;
 use futuresdr::num_complex::Complex64;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::ItemTag;
@@ -15,15 +13,16 @@ use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
+use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
+use futuresdr::tracing::debug;
 use futuresdr::tracing::warn;
 
-use crate::utilities::*;
-
-// use scilib::math::bessel;
+use crate::utils::*;
 
 #[allow(non_snake_case)]
 pub fn bessel_I0(x: f64) -> f64 {
@@ -64,7 +63,7 @@ pub struct FftDemod {
 }
 
 impl FftDemod {
-    pub fn new(soft_decoding: bool, sf_initial: usize) -> Block {
+    pub fn new(soft_decoding: bool, sf_initial: usize, ldro: bool) -> TypedBlock<Self> {
         let m_samples_per_symbol = 1_usize << sf_initial;
         let fft_plan = FftPlanner::new().plan_fft_forward(m_samples_per_symbol);
         let fs = Self {
@@ -73,7 +72,7 @@ impl FftDemod {
             m_soft_decoding: soft_decoding,
             max_log_approx: true,
             m_samples_per_symbol,
-            base_downchirp: build_upchirp(0, sf_initial, 1)
+            base_downchirp: build_upchirp(0, sf_initial, 1, false)
                 .iter()
                 .map(|&x| Complex64::new(x.re as f64, x.im as f64).conj())
                 .collect(),
@@ -81,7 +80,7 @@ impl FftDemod {
             output: Vec::with_capacity(8),
             llrs_block: Vec::with_capacity(8),
             is_header: false,
-            m_ldro: false,
+            m_ldro: ldro,
             m_symb_numb: 0,
             fft_plan,
             lls: vec![0.; m_samples_per_symbol],
@@ -94,7 +93,7 @@ impl FftDemod {
         } else {
             sio = sio.add_output::<u16>("out")
         }
-        Block::new(
+        TypedBlock::new(
             BlockMetaBuilder::new("FftDemod").build(),
             sio.build(),
             MessageIoBuilder::new().build(),
@@ -109,7 +108,7 @@ impl FftDemod {
         self.m_sf = sf;
         self.m_samples_per_symbol = 1_usize << self.m_sf;
         self.fft_plan = FftPlanner::new().plan_fft_forward(self.m_samples_per_symbol);
-        self.base_downchirp = build_upchirp(0, sf, 1)
+        self.base_downchirp = build_upchirp(0, sf, 1, false)
             .iter()
             .map(|&x| Complex64::new(x.re as f64, x.im as f64).conj())
             .collect();
@@ -206,6 +205,7 @@ impl FftDemod {
             } else {
                 //std::cerr << RED << "Log-Likelihood clipping :-( SNR: " << SNRdB_estimate << " |Y|: " << std::sqrt(m_fft_mag_sq[n]) << RESET << std::endl;
                 //LLs[n] = std::numeric_limits<LLR>::max();  // clipping
+                debug!("Log-Likelihood clipping");
                 clipping = true;
                 break;
             }
@@ -252,8 +252,8 @@ impl FftDemod {
                 let mut sum_x0: f64 = 0.; // X1 = set of symbols where i-th bit is '1'
                 for (n, &ll) in self.lls.iter().enumerate() {
                     // for all symbols n : 0 --> 2^sf
-                    let mut s: usize =
-                        ((n - 1) % (1 << self.m_sf)) / if self.reduced_rate() { 4 } else { 1 };
+                    let mut s: usize = my_modulo(n as isize - 1, 1 << self.m_sf)
+                        / if self.reduced_rate() { 4 } else { 1 };
                     s = s ^ (s >> 1); // Gray demap
                     if (s & (1 << i)) != 0 {
                         sum_x1 += ll;

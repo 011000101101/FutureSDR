@@ -1,20 +1,17 @@
 mod fft_shift;
+use anyhow::Result;
 use fft_shift::FftShift;
-mod keep_1_in_n;
-use keep_1_in_n::Keep1InN;
-
-use std::env;
-
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::blocks::Apply;
 use futuresdr::blocks::Fft;
+use futuresdr::blocks::MovingAvg;
 use futuresdr::blocks::WebsocketSinkBuilder;
 use futuresdr::blocks::WebsocketSinkMode;
 use futuresdr::num_complex::Complex32;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
 use futuresdr::tracing::info;
+use std::env;
 
 pub fn run_fg() -> Result<()> {
     futuresdr::runtime::init();
@@ -42,13 +39,13 @@ pub fn run_fg() -> Result<()> {
         .mode(WebsocketSinkMode::FixedDropping(2048))
         .build();
 
-    let src = fg.add_block(src);
-    let fft = fg.add_block(Fft::new(2048));
-    let power = fg.add_block(Apply::new(|x: &Complex32| x.norm()));
-    let log = fg.add_block(Apply::new(|x: &f32| 10.0 * x.log10()));
-    let shift = fg.add_block(FftShift::<f32>::new());
-    let keep = fg.add_block(Keep1InN::new(0.1, 10));
-    let snk = fg.add_block(snk);
+    let src = fg.add_block(src)?;
+    let fft = fg.add_block(Fft::new(2048))?;
+    let power = fg.add_block(Apply::new(|x: &Complex32| x.norm()))?;
+    let log = fg.add_block(Apply::new(|x: &f32| 10.0 * x.log10()))?;
+    let shift = fg.add_block(FftShift::<f32>::new())?;
+    let keep = fg.add_block(MovingAvg::<2048>::new(0.1, 10))?;
+    let snk = fg.add_block(snk)?;
 
     fg.connect_stream(src, "out", fft, "in")?;
     fg.connect_stream(fft, "out", power, "in")?;
@@ -64,7 +61,8 @@ pub fn run_fg() -> Result<()> {
 #[cfg(target_os = "android")]
 mod android {
     use super::*;
-    use jni::objects::{JClass, JString};
+    use jni::objects::JClass;
+    use jni::objects::JString;
     use jni::sys::jint;
     use jni::JNIEnv;
 

@@ -1,11 +1,10 @@
-use futuresdr::anyhow::Result;
 use futuresdr::macros::async_trait;
-use futuresdr::runtime::Block;
 use futuresdr::runtime::BlockMeta;
 use futuresdr::runtime::BlockMetaBuilder;
 use futuresdr::runtime::Kernel;
 use futuresdr::runtime::MessageIo;
 use futuresdr::runtime::MessageIoBuilder;
+use futuresdr::runtime::Result;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::TypedBlock;
@@ -19,11 +18,7 @@ pub struct MovingAverage {
 }
 
 impl MovingAverage {
-    pub fn new(len: usize) -> Block {
-        Block::from_typed(Self::new_typed(len))
-    }
-
-    pub fn new_typed(len: usize) -> TypedBlock<Self> {
+    pub fn new(len: usize) -> TypedBlock<Self> {
         assert!(len > 0);
         TypedBlock::new(
             BlockMetaBuilder::new("MovingAverage").build(),
