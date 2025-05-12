@@ -47,44 +47,22 @@ impl Modulator {
         }
     }
 
-    fn samples_from_phase_diff(
-        &self,
-        phase_increments: &[f32],
-        reset_phase: Option<&[bool]>,
-    ) -> Vec<Complex32> {
+    fn samples_from_phase_diff(&self, phase_increments: &[f32]) -> Vec<Complex32> {
         let mut last_phase = 0.0;
-        if let Some(reset_vec) = reset_phase {
-            phase_increments
-                .iter()
-                .zip(reset_vec)
-                .map(|(p_i, reset_phase)| {
-                    if *reset_phase {
-                        last_phase = 0.0;
-                    }
-                    let tmp =
-                        Complex32::new(1.0, 0.0) * Complex32::from_polar(1., last_phase + *p_i);
-                    last_phase += *p_i;
-                    tmp
-                })
-                .collect()
-        } else {
-            phase_increments
-                .iter()
-                .map(|p_i| {
-                    let tmp =
-                        Complex32::new(1.0, 0.0) * Complex32::from_polar(1., last_phase + *p_i);
-                    last_phase += *p_i;
-                    tmp
-                })
-                .collect()
-        }
+        phase_increments
+            .iter()
+            .map(|p_i| {
+                let tmp = Complex32::new(1.0, 0.0) * Complex32::from_polar(1., last_phase + *p_i);
+                last_phase += *p_i;
+                tmp
+            })
+            .collect()
     }
 
     pub fn modulate(&self, frame: Vec<u16>) -> Vec<Complex32> {
         let mut preamb_samp_cnt = 0;
 
         let mut phase_increments = vec![0.0; self.pad_front];
-        let mut reset_phase = vec![false; self.pad_front];
 
         loop {
             // output preamble part
@@ -186,8 +164,7 @@ impl Modulator {
         }
 
         phase_increments.extend_from_slice(&vec![0.0; self.pad_tail]);
-        reset_phase.extend_from_slice(&vec![false; self.pad_tail]);
 
-        self.samples_from_phase_diff(&phase_increments, Some(&reset_phase))
+        self.samples_from_phase_diff(&phase_increments)
     }
 }
