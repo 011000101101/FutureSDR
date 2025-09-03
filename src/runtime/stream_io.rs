@@ -277,7 +277,10 @@ impl StreamOutput {
 
     /// Initialize port, setting the writer
     pub fn init(&mut self, writer: BufferWriter) {
-        debug_assert!(self.writer.is_none(), "An output port can only have one writer. Connect on the same stream output port can only be called multiple times if the supplied buffer is identical and supports multiple readers. If you called connect with explicitly sized Circular buffers, check that the supplied minimum buffer size is identical across calls.");
+        debug_assert!(
+            self.writer.is_none(),
+            "An output port can only have one writer. Connect on the same stream output port can only be called multiple times if the supplied buffer is identical and supports multiple readers. If you called connect with explicitly sized Circular buffers, check that the supplied minimum buffer size is identical across calls."
+        );
         self.writer = Some(writer);
     }
 

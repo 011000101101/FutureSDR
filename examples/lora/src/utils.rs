@@ -9,13 +9,13 @@ use std::ops::Mul;
 use std::ops::Rem;
 use std::sync::Arc;
 
-use clap::builder::PossibleValue;
-use clap::builder::TypedValueParser;
-use clap::error::ErrorKind;
 use clap::Arg;
 use clap::Command;
 use clap::Error;
 use clap::ValueEnum;
+use clap::builder::PossibleValue;
+use clap::builder::TypedValueParser;
+use clap::error::ErrorKind;
 use num_traits::Num;
 // use num_traits::Pow;
 use rustfft::Fft;

@@ -27,8 +27,8 @@ use std::cmp::min;
 
 use num_complex::Complex32;
 
-use futuredsp::prelude::*;
 use futuredsp::FirFilter;
+use futuredsp::prelude::*;
 
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;

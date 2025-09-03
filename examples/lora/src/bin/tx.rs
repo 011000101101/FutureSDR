@@ -11,11 +11,11 @@ use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
 use futuresdr::tracing::info;
+use lora::Transmitter;
 use lora::utils::Bandwidth;
 use lora::utils::Channel;
 use lora::utils::CodeRate;
 use lora::utils::SpreadingFactor;
-use lora::Transmitter;
 
 #[derive(Parser, Debug)]
 struct Args {

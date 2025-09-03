@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use anyhow::Result;
+use anyhow::anyhow;
 use clap::Parser;
 
 use futuresdr::async_io::Timer;
@@ -13,10 +13,6 @@ use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
 use futuresdr::tracing::info;
-use lora::default_values::ldro;
-use lora::utils::Bandwidth;
-use lora::utils::CodeRate;
-use lora::utils::SpreadingFactor;
 use lora::Decoder;
 use lora::Deinterleaver;
 use lora::FftDemod;
@@ -26,6 +22,10 @@ use lora::HammingDec;
 use lora::HeaderDecoder;
 use lora::HeaderMode;
 use lora::Transmitter;
+use lora::default_values::ldro;
+use lora::utils::Bandwidth;
+use lora::utils::CodeRate;
+use lora::utils::SpreadingFactor;
 
 #[derive(Parser, Debug)]
 #[clap(version)]

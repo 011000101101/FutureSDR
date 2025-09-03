@@ -17,10 +17,10 @@ use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
 use futuresdr::tracing::warn;
 
-use crate::utils::CodeRate;
-use crate::utils::SpreadingFactor;
 use crate::Encoder;
 use crate::Modulator;
+use crate::utils::CodeRate;
+use crate::utils::SpreadingFactor;
 
 pub struct Transmitter {
     frames: VecDeque<Vec<u8>>,

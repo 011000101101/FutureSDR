@@ -1,10 +1,10 @@
 use futuresdr::num_complex::Complex32;
 use futuresdr::tracing::warn;
 
+use crate::utils::LEGACY_SF_5_6;
+use crate::utils::SpreadingFactor;
 use crate::utils::build_upchirp_phase_coherent;
 use crate::utils::expand_sync_word;
-use crate::utils::SpreadingFactor;
-use crate::utils::LEGACY_SF_5_6;
 
 pub struct Modulator {
     spreading_factor: SpreadingFactor,
@@ -26,15 +26,24 @@ impl Modulator {
     ) -> Self {
         if preamble_len < 5 {
             warn!("Preamble length should be at least 5!"); // TODO
-                                                            // preamble_len = 5;
+            // preamble_len = 5;
         }
         let sync_words_expanded = expand_sync_word(sync_words.clone());
         if sync_words[0] != 0x12 && spreading_factor < SpreadingFactor::SF7 {
-            warn!("LoRa Modulator: selecting sync word other than 0x12 for SF < 7 will likely not work with commercial receivers.\n\tSee e.g. https://github.com/Lora-net/sx1302_hal/issues/124#issuecomment-2173450337");
+            warn!(
+                "LoRa Modulator: selecting sync word other than 0x12 for SF < 7 will likely not work with commercial receivers.\n\tSee e.g. https://github.com/Lora-net/sx1302_hal/issues/124#issuecomment-2173450337"
+            );
         }
         for sync_word_symbol in sync_words_expanded.iter() {
             if *sync_word_symbol >= 1 << Into::<usize>::into(spreading_factor) {
-                panic!("LoRa Modulator: can not encode chosen sync word with the given spreading factor: symbol space too small.\n\ttried to encode sync word '{}' (symbol values [{}, {}]), with {}, which only supports symbols within [0; {}].", sync_words[0], sync_words_expanded[0], sync_words_expanded[1], spreading_factor, 1 << Into::<usize>::into(spreading_factor));
+                panic!(
+                    "LoRa Modulator: can not encode chosen sync word with the given spreading factor: symbol space too small.\n\ttried to encode sync word '{}' (symbol values [{}, {}]), with {}, which only supports symbols within [0; {}].",
+                    sync_words[0],
+                    sync_words_expanded[0],
+                    sync_words_expanded[1],
+                    spreading_factor,
+                    1 << Into::<usize>::into(spreading_factor)
+                );
             }
         }
         Modulator {

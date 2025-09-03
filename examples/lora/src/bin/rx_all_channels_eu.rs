@@ -6,20 +6,18 @@ use clap::Parser;
 use strum::IntoEnumIterator;
 
 use futuredsp::firdes::remez;
-use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::blocks::BlobToUdp;
 use futuresdr::blocks::MessageAnnotator;
 use futuresdr::blocks::NullSink;
 use futuresdr::blocks::PfbArbResampler;
 use futuresdr::blocks::PfbChannelizer;
+use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::macros::connect;
 use futuresdr::num_complex::Complex32;
-use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::Runtime;
-use lora::default_values::ldro;
-use lora::utils::SpreadingFactor;
+use futuresdr::runtime::buffer::circular::Circular;
 use lora::Decoder;
 use lora::Deinterleaver;
 use lora::FftDemod;
@@ -29,6 +27,8 @@ use lora::HammingDec;
 use lora::HeaderDecoder;
 use lora::HeaderMode;
 use lora::PacketForwarderClient;
+use lora::default_values::ldro;
+use lora::utils::SpreadingFactor;
 
 #[derive(Parser, Debug)]
 #[clap(version)]

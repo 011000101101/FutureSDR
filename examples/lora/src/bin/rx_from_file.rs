@@ -1,5 +1,5 @@
-use anyhow::anyhow;
 use anyhow::Result;
+use anyhow::anyhow;
 use futuredsp::firdes;
 use futuresdr::blocks::BlobToUdp;
 use futuresdr::blocks::Delay;
@@ -7,11 +7,10 @@ use futuresdr::blocks::FileSource;
 use futuresdr::blocks::XlatingFirBuilder;
 use futuresdr::macros::connect;
 use futuresdr::num_complex::Complex32;
-use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Runtime;
+use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::tracing::error;
-use lora::utils::SpreadingFactor;
 use lora::Decoder;
 use lora::Deinterleaver;
 use lora::FftDemod;
@@ -20,6 +19,7 @@ use lora::GrayMapping;
 use lora::HammingDec;
 use lora::HeaderDecoder;
 use lora::HeaderMode;
+use lora::utils::SpreadingFactor;
 
 const SOFT_DECODING: bool = false;
 const IMPLICIT_HEADER: bool = false;
