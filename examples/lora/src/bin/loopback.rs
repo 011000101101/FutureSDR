@@ -8,7 +8,6 @@ use clap::Parser;
 use futuresdr::async_io::Timer;
 use futuresdr::blocks::BlobToUdp;
 use futuresdr::macros::connect;
-use futuresdr::runtime::buffer::circular::Circular;
 use futuresdr::runtime::BlockT;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::Pmt;

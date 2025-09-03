@@ -1,18 +1,17 @@
 //! Stream-based Ports
+use futures::channel::mpsc::Sender;
 use std::any::Any;
 use std::any::TypeId;
 use std::fmt;
 use std::mem;
 use std::slice;
 
-use futures::channel::mpsc::Sender;
-
-use crate::runtime::buffer::BufferReader;
-use crate::runtime::buffer::BufferWriter;
-use crate::runtime::tag::default_tag_propagation;
 use crate::runtime::BlockMessage;
 use crate::runtime::ItemTag;
 use crate::runtime::Tag;
+use crate::runtime::buffer::BufferReader;
+use crate::runtime::buffer::BufferWriter;
+use crate::runtime::tag::default_tag_propagation;
 
 #[derive(Debug)]
 struct CurrentInput {
@@ -147,8 +146,10 @@ impl StreamInput {
     /// # Safety
     /// The block has to be the sole reader for the input buffer.
     pub unsafe fn slice_mut<T>(&mut self) -> &'static mut [T] {
-        assert_eq!(self.type_id, TypeId::of::<T>());
-        self.slice_mut_unchecked()
+        unsafe {
+            assert_eq!(self.type_id, TypeId::of::<T>());
+            self.slice_mut_unchecked()
+        }
     }
 
     /// Returns a mutable slice to the input buffer.
@@ -156,8 +157,10 @@ impl StreamInput {
     /// # Safety
     /// The block has to be the sole reader for the input buffer.
     pub unsafe fn slice_mut_unchecked<T>(&mut self) -> &'static mut [T] {
-        let s = self.slice::<T>();
-        slice::from_raw_parts_mut(s.as_ptr() as *mut T, s.len())
+        unsafe {
+            let s = self.slice::<T>();
+            slice::from_raw_parts_mut(s.as_ptr() as *mut T, s.len())
+        }
     }
 
     /// Get [`ItemTags`](ItemTag) in buffer
@@ -274,9 +277,6 @@ impl StreamOutput {
 
     /// Initialize port, setting the writer
     pub fn init(&mut self, writer: BufferWriter) {
-        if self.writer.is_some() {
-            debug!("Stream IO: name: {}", self.name);
-        }
         debug_assert!(self.writer.is_none(), "An output port can only have one writer. Connect on the same stream output port can only be called multiple times if the supplied buffer is identical and supports multiple readers. If you called connect with explicitly sized Circular buffers, check that the supplied minimum buffer size is identical across calls.");
         self.writer = Some(writer);
     }
@@ -378,8 +378,7 @@ impl StreamOutput {
     /// Get a mutable reference to the buffer writer
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn writer_mut(&mut self) -> &mut BufferWriter {
-        let w = self.writer.as_mut().unwrap();
-        w
+        self.writer.as_mut().unwrap()
     }
 }
 

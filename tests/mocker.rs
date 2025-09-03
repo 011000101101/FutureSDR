@@ -1,18 +1,19 @@
 use anyhow::Result;
 use futuresdr::blocks::Apply;
 use futuresdr::blocks::MessageCopy;
-use futuresdr::runtime::copy_tag_propagation;
 use futuresdr::runtime::ItemTag;
 use futuresdr::runtime::Mocker;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::PortId;
 use futuresdr::runtime::Tag;
+use futuresdr::runtime::copy_tag_propagation;
 use rand::Rng;
+use rand::distr::Uniform;
 
 #[test]
 fn multi_input_mock() {
-    let input: Vec<u32> = rand::thread_rng()
-        .sample_iter(rand::distributions::Uniform::<u32>::new(0, 1024))
+    let input: Vec<u32> = rand::rng()
+        .sample_iter(Uniform::<u32>::new(0, 1024).unwrap())
         .take(128)
         .collect();
 

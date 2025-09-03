@@ -1,13 +1,14 @@
-use crate::runtime::BlockMeta;
-use crate::runtime::BlockMetaBuilder;
-use crate::runtime::Kernel;
-use crate::runtime::MessageIo;
-use crate::runtime::MessageIoBuilder;
-use crate::runtime::Result;
-use crate::runtime::StreamIo;
-use crate::runtime::StreamIoBuilder;
-use crate::runtime::TypedBlock;
-use crate::runtime::WorkIo;
+use futuresdr::macros::async_trait;
+use futuresdr::runtime::BlockMeta;
+use futuresdr::runtime::BlockMetaBuilder;
+use futuresdr::runtime::Kernel;
+use futuresdr::runtime::MessageIo;
+use futuresdr::runtime::MessageIoBuilder;
+use futuresdr::runtime::Result;
+use futuresdr::runtime::StreamIo;
+use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::TypedBlock;
+use futuresdr::runtime::WorkIo;
 use rand::Rng;
 use std::marker::PhantomData;
 
@@ -61,7 +62,7 @@ impl<T: Copy + Send + 'static> Kernel for CopyRand<T> {
 
         let mut m = *[self.max_copy, i.len(), o.len()].iter().min().unwrap_or(&0);
         if m > 0 {
-            m = rand::rng().random_range(..m + 1);
+            m = rand::rng().random_range(1..=m);
             o[..m].copy_from_slice(&i[..m]);
             sio.input(0).consume(m);
             sio.output(0).produce(m);

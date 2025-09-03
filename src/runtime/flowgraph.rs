@@ -22,7 +22,6 @@ use crate::runtime::Kernel;
 use crate::runtime::Pmt;
 use crate::runtime::PortId;
 use crate::runtime::Topology;
-use crate::tracing::warn;
 
 /// The main component of any FutureSDR program.
 ///
@@ -70,7 +69,10 @@ impl Flowgraph {
             )) => {
                 // let buffer_size = (minimum_buffer_size as f32 * config::config().buffer_capacity_to_minimum_size_ratio).ceil() as usize;
                 let buffer_size = minimum_buffer_size * 2;
-                warn!("Default buffer size ({} bytes) insufficient for stream connection between {0}.{1:?} and {2}.{3:?}. Requires at least {minimum_buffer_size} bytes. Trying to connect with a Circular buffer with a capacity of at least {buffer_size} bytes.", src_blk, src_prt, dst_blk, dst_prt); // TODO this doesn't print
+                warn!(
+                    "Default buffer size ({} bytes) insufficient for stream connection between {0}.{1:?} and {2}.{3:?}. Requires at least {minimum_buffer_size} bytes. Trying to connect with a Circular buffer with a capacity of at least {buffer_size} bytes.",
+                    src_blk, src_prt, dst_blk, dst_prt
+                ); // TODO this doesn't print
                 self.connect_stream_with_type(
                     src_block,
                     src_port,

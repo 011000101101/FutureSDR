@@ -1,4 +1,6 @@
 //! Remote Control through REST API
+use axum::Json;
+use axum::Router;
 use axum::extract::Path;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -7,8 +9,6 @@ use axum::response::Redirect;
 use axum::routing::any;
 use axum::routing::get;
 use axum::routing::get_service;
-use axum::Json;
-use axum::Router;
 use futures::channel::oneshot;
 use std::path;
 use std::thread::JoinHandle;
@@ -16,15 +16,15 @@ use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
-use crate::runtime::config;
 use crate::runtime::BlockDescription;
 use crate::runtime::FlowgraphDescription;
 use crate::runtime::Pmt;
 use crate::runtime::PortId;
 use crate::runtime::RuntimeHandle;
+use crate::runtime::config;
 
 macro_rules! relative {
-    ($path:expr) => {
+    ($path:expr_2021) => {
         if cfg!(windows) {
             concat!(env!("CARGO_MANIFEST_DIR"), "\\", $path)
         } else {
@@ -127,14 +127,14 @@ impl ControlPort {
 
         let mut app = Router::new()
             .route("/api/fg/", get(flowgraphs))
-            .route("/api/fg/:fg/", get(flowgraph_description))
-            .route("/api/fg/:fg/block/:blk/", get(block_description))
+            .route("/api/fg/{fg}/", get(flowgraph_description))
+            .route("/api/fg/{fg}/block/{blk}/", get(block_description))
             .route(
-                "/api/fg/:fg/block/:blk/call/:handler/",
+                "/api/fg/{fg}/block/{blk}/call/{handler}/",
                 get(handler_id).post(handler_id_post),
             )
             .route(
-                "/api/block/*foo",
+                "/api/block/{*foo}",
                 any(|uri: Uri| async move {
                     let u = uri.to_string().split_off(11);
                     Redirect::permanent(&format!("/api/fg/0/block/{u}/"))
@@ -144,7 +144,7 @@ impl ControlPort {
             .with_state(self.handle.clone());
 
         if let Some(c) = custom_routes {
-            app = app.nest("/", c);
+            app = app.merge(c);
         }
 
         let frontend = if let Some(ref p) = config::config().frontend_path {
@@ -169,13 +169,16 @@ impl ControlPort {
 
             runtime.spawn(async move {
                 let addr = config::config().ctrlport_bind.unwrap();
-                if let Ok(listener) = TcpListener::bind(&addr).await {
-                    debug!("Listening on {}", addr);
-                    axum::serve(listener, app.into_make_service())
-                        .await
-                        .unwrap();
-                } else {
-                    warn!("CtrlPort address {} already in use", addr);
+                match TcpListener::bind(&addr).await {
+                    Ok(listener) => {
+                        debug!("Listening on {}", addr);
+                        axum::serve(listener, app.into_make_service())
+                            .await
+                            .unwrap();
+                    }
+                    _ => {
+                        warn!("CtrlPort address {} already in use", addr);
+                    }
                 }
             });
 

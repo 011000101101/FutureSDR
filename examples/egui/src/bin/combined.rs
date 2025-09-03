@@ -5,14 +5,14 @@ use eframe::egui::mutex::Mutex;
 use eframe::egui::widgets::SliderClamping;
 use eframe::egui_glow;
 use eframe::glow;
-use futuresdr::blocks::seify::SourceBuilder;
 use futuresdr::blocks::Fft;
 use futuresdr::blocks::FftDirection;
 use futuresdr::blocks::MovingAvg;
-use futuresdr::futures::channel::mpsc::channel;
+use futuresdr::blocks::seify::SourceBuilder;
+use futuresdr::futures::StreamExt;
 use futuresdr::futures::channel::mpsc::Receiver;
 use futuresdr::futures::channel::mpsc::Sender;
-use futuresdr::futures::StreamExt;
+use futuresdr::futures::channel::mpsc::channel;
 use futuresdr::macros::connect;
 use futuresdr::runtime::Flowgraph;
 use futuresdr::runtime::FlowgraphHandle;
@@ -50,7 +50,7 @@ async fn process_gui_actions(
     while let Some(m) = rx.next().await {
         match m {
             GuiAction::SetFreq(f) => {
-                println!("setting frequency to {}MHz", f);
+                println!("setting frequency to {f}MHz");
                 handle.call(0, 0, Pmt::U64(f * 1000000)).await?
             }
         };

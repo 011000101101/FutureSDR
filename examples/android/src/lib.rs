@@ -4,11 +4,11 @@ use futuresdr::blocks::VectorSink;
 use futuresdr::blocks::VectorSinkBuilder;
 use futuresdr::blocks::VectorSource;
 use futuresdr::blocks::VulkanBuilder;
+use futuresdr::runtime::Flowgraph;
+use futuresdr::runtime::Runtime;
 use futuresdr::runtime::buffer::vulkan::Broker;
 use futuresdr::runtime::buffer::vulkan::D2H;
 use futuresdr::runtime::buffer::vulkan::H2D;
-use futuresdr::runtime::Flowgraph;
-use futuresdr::runtime::Runtime;
 use futuresdr::tracing::info;
 use std::iter::repeat_with;
 use std::sync::Arc;
@@ -52,22 +52,24 @@ pub fn run_fg() -> Result<()> {
 #[cfg(target_os = "android")]
 mod android {
     use super::*;
+    use jni::JNIEnv;
     use jni::objects::JClass;
     use jni::objects::JString;
-    use jni::JNIEnv;
 
     #[allow(non_snake_case)]
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub extern "system" fn Java_net_bastibl_futuresdr_MainActivity_runFg(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         tmp_dir: JString,
     ) {
         let dir: String = env
-            .get_string(tmp_dir)
+            .get_string(&tmp_dir)
             .expect("Couldn't get java string!")
             .into();
-        std::env::set_var("FUTURESDR_tmp_dir", dir);
+        unsafe {
+            std::env::set_var("FUTURESDR_tmp_dir", dir);
+        }
         run_fg().unwrap();
     }
 }

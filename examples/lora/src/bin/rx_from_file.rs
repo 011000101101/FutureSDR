@@ -1,6 +1,6 @@
+use anyhow::anyhow;
+use anyhow::Result;
 use futuredsp::firdes;
-use futuresdr::anyhow::anyhow;
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::BlobToUdp;
 use futuresdr::blocks::Delay;
 use futuresdr::blocks::FileSource;

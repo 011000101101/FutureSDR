@@ -1,7 +1,7 @@
 use rustfft::num_complex::Complex32;
 
+use anyhow::Result;
 use futuredsp::firdes::remez;
-use futuresdr::anyhow::Result;
 use futuresdr::blocks::FileSink;
 use futuresdr::blocks::FileSource;
 use futuresdr::blocks::PfbChannelizer;
@@ -34,8 +34,8 @@ fn main() -> Result<()> {
     .into_iter()
     .map(|x| x as f32)
     .collect();
-    let channelizer = fg.add_block(PfbChannelizer::new(NUM_CHANNELS, &channelizer_taps, 1.0));
-    let synthesizer = fg.add_block(PfbSynthesizer::new(NUM_CHANNELS, &channelizer_taps));
+    let channelizer = fg.add_block(PfbChannelizer::new(NUM_CHANNELS, &channelizer_taps, 1.0))?;
+    let synthesizer = fg.add_block(PfbSynthesizer::new(NUM_CHANNELS, &channelizer_taps))?;
     connect!(fg, src > channelizer);
     for n_out in 0..NUM_CHANNELS {
         fg.connect_stream(
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
     }
     let sink = fg.add_block(FileSink::<Complex32>::new(
         "/home/vmechler/Documents/lora/synthesizer_test.cf32",
-    ));
+    ))?;
     connect!(fg, synthesizer > sink);
 
     let _ = rt.run(fg);

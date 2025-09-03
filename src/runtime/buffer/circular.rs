@@ -5,14 +5,14 @@ use futures::channel::mpsc::Sender;
 use futures::prelude::*;
 use vmcircbuffer::generic;
 
+use crate::runtime::BlockMessage;
+use crate::runtime::ItemTag;
 use crate::runtime::buffer::BufferBuilder;
 use crate::runtime::buffer::BufferReader;
 use crate::runtime::buffer::BufferReaderHost;
 use crate::runtime::buffer::BufferWriter;
 use crate::runtime::buffer::BufferWriterHost;
 use crate::runtime::config;
-use crate::runtime::BlockMessage;
-use crate::runtime::ItemTag;
 
 // everything is measured in items, e.g., offsets, capacity, space available
 
@@ -225,13 +225,14 @@ impl BufferReaderHost for Reader {
     }
 
     fn bytes(&mut self) -> (*const u8, usize, Vec<ItemTag>) {
-        if let Some((s, mut tags)) = self.reader.slice(false) {
-            for t in tags.iter_mut() {
-                t.index /= self.item_size;
+        match self.reader.slice(false) {
+            Some((s, mut tags)) => {
+                for t in tags.iter_mut() {
+                    t.index /= self.item_size;
+                }
+                (s.as_ptr(), s.len(), tags)
             }
-            (s.as_ptr(), s.len(), tags)
-        } else {
-            (std::ptr::null(), 0, Vec::new())
+            _ => (std::ptr::null(), 0, Vec::new()),
         }
     }
 

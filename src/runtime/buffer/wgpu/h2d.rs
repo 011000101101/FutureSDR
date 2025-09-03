@@ -1,20 +1,19 @@
+use futures::channel::mpsc::Sender;
+use futures::prelude::*;
 use std::any::Any;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use futures::channel::mpsc::Sender;
-use futures::prelude::*;
-
-use crate::runtime::buffer::wgpu::InputBufferEmpty as BufferEmpty;
-use crate::runtime::buffer::wgpu::InputBufferFull as BufferFull;
+use crate::runtime::BlockMessage;
+use crate::runtime::ItemTag;
 use crate::runtime::buffer::BufferBuilder;
 use crate::runtime::buffer::BufferReader;
 use crate::runtime::buffer::BufferReaderCustom;
 use crate::runtime::buffer::BufferWriter;
 use crate::runtime::buffer::BufferWriterHost;
-use crate::runtime::BlockMessage;
-use crate::runtime::ItemTag;
+use crate::runtime::buffer::wgpu::InputBufferEmpty as BufferEmpty;
+use crate::runtime::buffer::wgpu::InputBufferFull as BufferFull;
 
 /// Host-to-Device stream connection
 #[derive(Debug, PartialEq, Hash)]

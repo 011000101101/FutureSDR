@@ -1,3 +1,5 @@
+use futures::channel::mpsc::Sender;
+use slab::Slab;
 use std::any::Any;
 use std::any::TypeId;
 use std::collections::HashMap;
@@ -5,16 +7,13 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::hash::Hasher;
 
-use futures::channel::mpsc::Sender;
-use slab::Slab;
-
-use crate::runtime::buffer::BufferBuilder;
-use crate::runtime::buffer::BufferWriter;
 use crate::runtime::Block;
 use crate::runtime::BlockMessage;
 use crate::runtime::ConnectCtx;
 use crate::runtime::Error;
 use crate::runtime::PortId;
+use crate::runtime::buffer::BufferBuilder;
+use crate::runtime::buffer::BufferWriter;
 
 pub trait BufferBuilderKey: Debug + Send + Sync {
     fn eq(&self, other: &dyn BufferBuilderKey) -> bool;
@@ -127,7 +126,7 @@ impl Topology {
         } else {
             let block_name = block.type_name();
             let block_id = self.blocks.vacant_key();
-            block.set_instance_name(format!("{}-{}", block_name, block_id));
+            block.set_instance_name(format!("{block_name}-{block_id}"));
         }
 
         Ok(self.blocks.insert(Some(block)))
@@ -324,15 +323,13 @@ impl Topology {
                         != 1
                     {
                         return Err(Error::ValidationError(format!(
-                            "Block {} stream input {} does not have exactly one input",
-                            block_id, input_id
+                            "Block {block_id} stream input {input_id} does not have exactly one input"
                         )));
                     }
                 }
             } else {
                 return Err(Error::ValidationError(format!(
-                    "Block {} not owned by topology",
-                    block_id
+                    "Block {block_id} not owned by topology"
                 )));
             }
         }
@@ -340,21 +337,18 @@ impl Topology {
         // check if all stream edges are valid
         for ((src, src_port, _), v) in self.stream_edges.iter() {
             let src_block = self.block_ref(*src).ok_or(Error::ValidationError(format!(
-                "Source block {} not found",
-                src
+                "Source block {src} not found"
             )))?;
             let output = src_block.stream_output(*src_port);
 
             for (dst, dst_port) in v.iter() {
                 let dst_block = self.block_ref(*dst).ok_or(Error::ValidationError(format!(
-                    "Destination block {} not found",
-                    dst
+                    "Destination block {dst} not found"
                 )))?;
                 let input = dst_block.stream_input(*dst_port);
                 if output.type_id() != input.type_id() {
                     return Err(Error::ValidationError(format!(
-                        "Item size of stream connection does not match ({}, {:?} -> {}, {:?})",
-                        src, src_port, dst, dst_port
+                        "Item size of stream connection does not match ({src}, {src:?} -> {dst}, {dst_port:?})"
                     )));
                 }
             }
@@ -366,12 +360,10 @@ impl Topology {
         let mut v = Vec::new();
         for (i, b) in self.blocks.iter() {
             let c = b.as_ref().ok_or(Error::ValidationError(format!(
-                "Block {} not present/not owned by topology",
-                i
+                "Block {i} not present/not owned by topology"
             )))?;
             let name = c.instance_name().ok_or(Error::ValidationError(format!(
-                "Block {}, {:?} has no instance name",
-                i, c
+                "Block {i}, {c:?} has no instance name"
             )))?;
             v.push(name.to_string());
         }

@@ -12,7 +12,6 @@
 //! ## Example
 //! An example flowgraph that forwards 123 zeros into a sink:
 //! ```
-//! use futuresdr::anyhow::Result;
 //! use futuresdr::blocks::Head;
 //! use futuresdr::blocks::NullSink;
 //! use futuresdr::blocks::NullSource;
@@ -43,19 +42,17 @@ extern crate futuresdr_macros;
 pub extern crate tracing;
 
 // re-exports
-pub use anyhow;
 #[cfg(not(target_arch = "wasm32"))]
 pub use async_io;
 #[cfg(not(target_arch = "wasm32"))]
 pub use async_net;
+pub use futuredsp;
 pub use futures;
 pub use futures_lite;
 pub use num_complex;
 pub use num_integer;
 #[cfg(feature = "seify")]
 pub use seify;
-
-pub use futuredsp;
 
 pub mod blocks;
 pub mod runtime;

@@ -102,13 +102,13 @@ pub fn connect(attr: proc_macro::TokenStream) -> proc_macro::TokenStream {
             return quote_spanned! {
                 t.span() => compile_error!("Connect macro expects flowgraph as first argument.")
             }
-            .into()
+            .into();
         }
         None => {
             return quote! {
                 compile_error!("Connect macro expects flowgraph and connections as arguments.")
             }
-            .into()
+            .into();
         }
     };
 
@@ -300,7 +300,7 @@ fn parse_connections(attrs: &mut Peekable<impl Iterator<Item = TokenTree>>) -> P
                     stream,
                     message,
                     blocks,
-                }
+                };
             }
         };
 
@@ -337,7 +337,7 @@ impl Endpoint {
         let i = match port {
             TokenTree::Ident(i) => i.to_string(),
             TokenTree::Literal(l) => l.to_string().replace('"', ""),
-            _ => return EndpointResult::Error(None, format!("invalid endpoint port {}", port)),
+            _ => return EndpointResult::Error(None, format!("invalid endpoint port {port}")),
         };
         EndpointResult::Point(Self {
             block,
@@ -353,8 +353,8 @@ impl Endpoint {
             _ => {
                 return EndpointResult::Error(
                     None,
-                    format!("invalid endpoint input port {}", in_port),
-                )
+                    format!("invalid endpoint input port {in_port}"),
+                );
             }
         };
         let output = match out_port {
@@ -363,8 +363,8 @@ impl Endpoint {
             _ => {
                 return EndpointResult::Error(
                     None,
-                    format!("invalid endpoint output port {}", out_port),
-                )
+                    format!("invalid endpoint output port {out_port}"),
+                );
             }
         };
         EndpointResult::Point(Self {
@@ -674,10 +674,10 @@ pub fn message_handler_external(
 }
 
 fn get_parameter_ident(arg: &syn::FnArg) -> Option<syn::Ident> {
-    if let syn::FnArg::Typed(syn::PatType { pat, .. }) = arg {
-        if let syn::Pat::Ident(ref i) = **pat {
-            return Some(i.ident.clone());
-        }
+    if let syn::FnArg::Typed(syn::PatType { pat, .. }) = arg
+        && let syn::Pat::Ident(ref i) = **pat
+    {
+        return Some(i.ident.clone());
     }
     None
 }
