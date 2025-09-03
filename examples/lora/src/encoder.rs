@@ -146,7 +146,6 @@ impl Encoder {
                     } else {
                         2
                     })
-                .into()
             //for sf<7 we don'tuse the ldro
             {
                 4

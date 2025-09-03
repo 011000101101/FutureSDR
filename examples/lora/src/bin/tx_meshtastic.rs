@@ -65,9 +65,9 @@ fn main() -> Result<()> {
         .build()?;
 
     let transmitter = Transmitter::new(
-        code_rate.into(),
+        code_rate,
         HAS_CRC,
-        spreading_factor.into(),
+        spreading_factor,
         ldro,
         IMPLICIT_HEADER,
         interpolation,

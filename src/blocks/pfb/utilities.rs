@@ -16,7 +16,7 @@ pub fn partition_filter_taps(
             .step_by(n_filters)
             .copied()
             // .rev()
-            .chain(std::iter::repeat(0.0).take(pad))
+            .chain(std::iter::repeat_n(0.0, pad))
             .collect();
         debug_assert_eq!(taps_tmp.len(), taps_per_filter);
         fir_filters.push(FirFilter::<Complex32, Complex32, _>::new(taps_tmp));

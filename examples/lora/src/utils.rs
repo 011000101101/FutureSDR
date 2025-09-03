@@ -149,7 +149,15 @@ impl clap::ValueEnum for Channel {
 }
 
 impl Channel {
-    pub fn try_from_idx(value: usize) -> Result<Self, ()> {
+    pub fn to_idx(&self) -> usize {
+        (*self as usize + 1) % 8
+    }
+}
+
+impl TryFrom<u8> for Channel {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(Channel::EU868_1),
             2 => Ok(Channel::EU868_2),
@@ -161,10 +169,6 @@ impl Channel {
             0 => Ok(Channel::EU868_8),
             _ => Err(()),
         }
-    }
-
-    pub fn to_idx(&self) -> usize {
-        (*self as usize + 1) % 8
     }
 }
 
@@ -553,7 +557,7 @@ pub fn build_upchirp_phase_coherent(
     let n_samples = n_samples.unwrap_or(n * os_factor);
     let mut phase_increment = vec![0.0_f32; n_samples];
     let polarity = if upchirp { 1.0 } else { -1.0 };
-    for t in 0..n_samples {
+    for (t, phase_increment_at_t) in phase_increment.iter_mut().enumerate().take(n_samples) {
         let t_ds = t as f64 / (n * os_factor) as f64;
         let tmp = t_ds - 0.5;
         let mut p = (
@@ -572,7 +576,7 @@ pub fn build_upchirp_phase_coherent(
             p += 1.0;
         }
         p *= polarity * (1.0 / os_factor as f32) * (2.0 * PI);
-        phase_increment[t] = p;
+        *phase_increment_at_t = p;
     }
     phase_increment
 }
