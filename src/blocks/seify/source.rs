@@ -4,6 +4,7 @@ use crate::blocks::seify::builder::BuilderType;
 use crate::num_complex::Complex32;
 use crate::runtime::BlockMeta;
 use crate::runtime::BlockMetaBuilder;
+use crate::runtime::Error;
 use crate::runtime::Kernel;
 use crate::runtime::MessageIo;
 use crate::runtime::MessageIoBuilder;
@@ -19,7 +20,6 @@ use seify::DeviceTrait;
 use seify::Direction::Rx;
 use seify::GenericDevice;
 use seify::RxStreamer;
-use std::time::Duration;
 
 /// Seify Source block
 ///
@@ -42,6 +42,7 @@ pub struct Source<D: DeviceTrait + Clone> {
     dev: Device<D>,
     streamer: Option<D::RxStreamer>,
     start_time: Option<i64>,
+    terminate_in: Option<usize>,
     overflows: u64,
 }
 
@@ -80,6 +81,7 @@ impl<D: DeviceTrait + Clone> Source<D> {
                 dev,
                 streamer: None,
                 start_time,
+                terminate_in: None,
                 overflows: 0,
             },
         )
@@ -93,16 +95,20 @@ impl<D: DeviceTrait + Clone> Source<D> {
     #[message_handler]
     fn terminate_handler(
         &mut self,
-        io: &mut WorkIo,
+        _io: &mut WorkIo,
         _mio: &mut MessageIo<Self>,
         _meta: &mut BlockMeta,
         p: Pmt,
     ) -> Result<Pmt> {
         match &p {
             Pmt::Ok => {
-                // allow some time for the RX streamer to receive any samples sent right before the sink terminated
-                async_std::task::sleep(Duration::from_secs_f32(0.5)).await;
-                io.finished = true
+                // allow some time (10ms) for the RX streamer to receive any samples sent right before the sink terminated
+                self.terminate_in = Some(
+                    (self
+                        .dev
+                        .sample_rate(Rx, *(self.channels.iter().next().unwrap()))?
+                        * 0.01) as usize,
+                );
             }
             _ => return Ok(Pmt::InvalidValue),
         };
@@ -172,15 +178,41 @@ impl<D: DeviceTrait + Clone> Source<D> {
         _meta: &mut BlockMeta,
         p: Pmt,
     ) -> Result<Pmt> {
+        let new_sample_rate = match &p {
+            Pmt::F32(v) => *v as f64,
+            Pmt::F64(v) => *v,
+            Pmt::U32(v) => *v as f64,
+            Pmt::U64(v) => *v as f64,
+            Pmt::Null => {
+                return Ok(Pmt::F64(
+                    self.dev.sample_rate(
+                        Rx,
+                        *(self
+                            .channels
+                            .iter()
+                            .next()
+                            .ok_or(Error::SeifyError("Device has no channels.".to_string()))?),
+                    )?,
+                ));
+            }
+            _ => return Ok(Pmt::InvalidValue),
+        };
+
+        // update termination counter (if present) to keep remaining time constant
+        if let Some(terminate_in) = self.terminate_in {
+            let old_sample_rate = self.dev.sample_rate(
+                Rx,
+                *(self
+                    .channels
+                    .iter()
+                    .next()
+                    .ok_or(Error::SeifyError("Device has no channels.".to_string()))?),
+            )?;
+            self.terminate_in =
+                Some(((terminate_in as f64 / old_sample_rate) * new_sample_rate) as usize);
+        }
         for c in &self.channels {
-            match &p {
-                Pmt::F32(v) => self.dev.set_sample_rate(Rx, *c, *v as f64)?,
-                Pmt::F64(v) => self.dev.set_sample_rate(Rx, *c, *v)?,
-                Pmt::U32(v) => self.dev.set_sample_rate(Rx, *c, *v as f64)?,
-                Pmt::U64(v) => self.dev.set_sample_rate(Rx, *c, *v as f64)?,
-                Pmt::Null => return Ok(Pmt::F64(self.dev.sample_rate(Rx, *c)?)),
-                _ => return Ok(Pmt::InvalidValue),
-            };
+            self.dev.set_sample_rate(Rx, *c, new_sample_rate)?;
         }
         Ok(Pmt::Ok)
     }
@@ -244,6 +276,9 @@ impl<D: DeviceTrait + Clone> Kernel for Source<D> {
                 for i in 0..outs.len() {
                     sio.output(i).produce(len);
                 }
+                if let Some(terminate_in) = self.terminate_in {
+                    self.terminate_in = Some(terminate_in.saturating_sub(len));
+                }
             }
             Err(seify::Error::Overflow) => {
                 self.overflows += 1;
@@ -254,6 +289,11 @@ impl<D: DeviceTrait + Clone> Kernel for Source<D> {
                 io.finished = true;
             }
         }
+
+        match self.terminate_in {
+            Some(0) => io.finished = true,
+            _ => {}
+        };
 
         io.call_again = true;
         Ok(())
