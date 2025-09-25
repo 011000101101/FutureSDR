@@ -1,7 +1,4 @@
-use std::collections::VecDeque;
-
 use anyhow::Result;
-
 use futuresdr::macros::async_trait;
 use futuresdr::macros::message_handler;
 use futuresdr::num_complex::Complex32;
@@ -13,9 +10,12 @@ use futuresdr::runtime::MessageIoBuilder;
 use futuresdr::runtime::Pmt;
 use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
+use futuresdr::runtime::Tag;
 use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
+use futuresdr::tracing::debug;
 use futuresdr::tracing::warn;
+use std::collections::VecDeque;
 
 use crate::Encoder;
 use crate::Modulator;
@@ -29,6 +29,7 @@ pub struct Transmitter {
     finished: bool,
     encoder: Encoder,
     modulator: Modulator,
+    tag_pending: Option<Tag>,
 }
 
 impl Transmitter {
@@ -65,12 +66,13 @@ impl Transmitter {
                     implicit_header,
                 ),
                 modulator: Modulator::new(
-                    spreading_factor,
+                    spreading_factor.into(),
                     oversampling,
                     sync_words,
                     preamble_len,
                     pad,
                 ),
+                tag_pending: None,
             },
         )
     }
@@ -111,6 +113,10 @@ impl Kernel for Transmitter {
             if let Some(frame) = self.frames.pop_front() {
                 self.current_frame = self.modulator.modulate(self.encoder.encode(frame));
                 self.current_offset = 0;
+                self.tag_pending = Some(Tag::NamedUsize(
+                    "burst_start".to_string(),
+                    self.current_frame.len(),
+                ));
             } else {
                 if self.finished {
                     io.finished = true;
@@ -128,17 +134,22 @@ impl Kernel for Transmitter {
             );
         }
 
-        self.current_offset += n;
-        sio.output(0).produce(n);
-
-        if self.current_offset == self.current_frame.len()
-            && self.frames.is_empty()
-            && self.finished
-        {
-            io.finished = true;
-        } else if out.len() > n {
+        if out.len() > n {
             io.call_again = true;
         }
+        if n > 0 {
+            debug!("produced {n}");
+            if let Some(tag) = self.tag_pending.take() {
+                if let Tag::NamedUsize(_, len) = tag {
+                    debug!("Lora TX: tagging burst_start with length {}", len)
+                }
+                sio.output(0).add_tag(0, tag);
+            }
+        } else {
+            debug!("produced nothjing, out.len() {}", out.len());
+        }
+        self.current_offset += n;
+        sio.output(0).produce(n);
 
         Ok(())
     }
