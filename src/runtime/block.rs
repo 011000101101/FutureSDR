@@ -135,6 +135,8 @@ pub trait BlockT: Send + Any {
         &mut self,
         f: Box<dyn FnMut(&mut [StreamInput], &mut [StreamOutput]) + Send + 'static>,
     );
+    /// Set actual input buffer size for dependent size computations
+    fn stream_input_set_actual_size(&mut self, id: usize, buffer_size: usize);
     /// Get stream input ports
     fn stream_inputs(&self) -> &Vec<StreamInput>;
     /// Get stream input port
@@ -478,6 +480,9 @@ impl<T: Kernel + Send + 'static> BlockT for TypedBlock<T> {
         f: Box<dyn FnMut(&mut [StreamInput], &mut [StreamOutput]) + Send + 'static>,
     ) {
         self.sio.set_tag_propagation(f)
+    }
+    fn stream_input_set_actual_size(&mut self, id: usize, buffer_size: usize) {
+        self.sio.input(id).set_actual_buffer_size(buffer_size);
     }
     fn stream_inputs(&self) -> &Vec<StreamInput> {
         self.sio.inputs()

@@ -188,6 +188,12 @@ impl Topology {
         };
         let sp = src.stream_output(src_port_id);
 
+        let dependent_buffer_sizes: Vec<usize> = src
+            .stream_inputs()
+            .iter()
+            .map(|input| input.get_actual_buffer_size())
+            .collect();
+
         let dst_port_id = match dst_port {
             PortId::Name(ref s) => dst
                 .stream_input_name_to_id(s)
@@ -202,9 +208,10 @@ impl Topology {
         };
         let dp = dst.stream_input(dst_port_id);
 
-        if (sp.get_minimum_buffer_size() + dp.get_minimum_buffer_size()).saturating_sub(1)
-            > buffer_builder.get_size()
-        {
+        let minimum_buffer_size = sp.get_minimum_buffer_size(&dependent_buffer_sizes)
+            + dp.get_minimum_buffer_size().saturating_sub(1);
+
+        if minimum_buffer_size > buffer_builder.get_size() {
             // println!("Insufficient buffer size between {:?}.{} and {:?}.{}. Might cause deadlocks. The required minimum buffer size is {} bytes, but a larger buffer should be preferred for efficiency. If you used an explicitly defined buffer, it is too small. Otherwise, the configured default buffer size is too small. Either increase it, or connect these ports using an explicitly defined buffer of sufficient size.", src, src_port, dst, dst_port, sp
             // .get_minimum_buffer_size()
             // .max(dp.get_minimum_buffer_size()));
@@ -213,7 +220,7 @@ impl Topology {
                 src_port,
                 dst_block,
                 dst_port,
-                (sp.get_minimum_buffer_size() + dp.get_minimum_buffer_size()).saturating_sub(1),
+                minimum_buffer_size,
             ));
         }
 
@@ -233,6 +240,18 @@ impl Topology {
         } else {
             self.stream_edges.insert(id, vec![(dst_block, dst_port_id)]);
         }
+        // Annotating minimum buffer size ({minimum_buffer_size}) at block {dst_block}
+        let dst_mut = self
+            .blocks
+            .iter_mut()
+            .nth(dst_block)
+            .ok_or(Error::InvalidBlock(dst_block))?
+            .1
+            .as_mut()
+            .ok_or(Error::InvalidBlock(dst_block))?;
+        dst_mut
+            .0
+            .stream_input_set_actual_size(dst_port_id, minimum_buffer_size);
         Ok(())
     }
 

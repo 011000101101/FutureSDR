@@ -260,6 +260,8 @@ pub mod zeromq;
 mod zynq;
 #[cfg(feature = "zynq")]
 pub use zynq::Zynq;
+mod burst_size_rewriter;
+pub use burst_size_rewriter::BurstSizeRewriter;
 #[cfg(feature = "zynq")]
 mod zynq_sync;
 

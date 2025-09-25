@@ -30,6 +30,7 @@ pub struct StreamInput {
     name: String,
     item_size: usize,
     min_buffer_size: usize,
+    actual_buffer_size: Option<usize>,
     type_id: TypeId,
     type_name: &'static str,
     reader: Option<BufferReader>,
@@ -44,6 +45,7 @@ impl StreamInput {
             name: name.to_string(),
             item_size: std::mem::size_of::<T>(),
             min_buffer_size: 0,
+            actual_buffer_size: None,
             type_id: TypeId::of::<T>(),
             type_name: std::any::type_name::<T>(),
             reader: None,
@@ -65,6 +67,16 @@ impl StreamInput {
     /// Get the minimum size in bytes of the buffer to be connected to this port, defaults to 0 if not set explicitly
     pub fn get_minimum_buffer_size(&self) -> usize {
         self.min_buffer_size
+    }
+
+    /// Set the actual assigned buffer size so it can be retrieved later for computing the size of dependent buffers
+    pub fn set_actual_buffer_size(&mut self, actual_buffer_size: usize) {
+        self.actual_buffer_size = Some(actual_buffer_size);
+    }
+
+    /// Get the actual assigned buffer size for computing the size of dependent buffers
+    pub fn get_actual_buffer_size(&self) -> usize {
+        self.actual_buffer_size.unwrap()
     }
 
     /// Get [`TypeId`] of items handled by the port
@@ -213,16 +225,30 @@ impl StreamInput {
 }
 
 /// Stream output port
-#[derive(Debug)]
 pub struct StreamOutput {
     name: String,
     item_size: usize,
-    min_buffer_size: usize,
+    #[allow(clippy::type_complexity)]
+    min_buffer_size: Box<dyn Fn(&[usize]) -> usize + Send>,
     type_id: TypeId,
     type_name: &'static str,
     writer: Option<BufferWriter>,
     tags: Vec<ItemTag>,
     offset: usize,
+}
+
+impl std::fmt::Debug for StreamOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("StreamOutput")
+            .field("name", &self.name)
+            .field("item_size", &self.item_size)
+            .field("type_id", &self.type_id)
+            .field("type_name", &self.type_name)
+            .field("writer", &self.writer)
+            .field("tags", &self.tags)
+            .field("offset", &self.offset)
+            .finish_non_exhaustive()
+    }
 }
 
 impl StreamOutput {
@@ -231,7 +257,7 @@ impl StreamOutput {
         StreamOutput {
             name: name.to_string(),
             item_size: std::mem::size_of::<T>(),
-            min_buffer_size: 0,
+            min_buffer_size: Box::new(|_: &[usize]| 0),
             type_id: TypeId::of::<T>(),
             type_name: std::any::type_name::<T>(),
             writer: None,
@@ -247,12 +273,20 @@ impl StreamOutput {
 
     /// Set the minimum size in bytes of the buffer to be connected to this port
     pub fn set_minimum_buffer_size(&mut self, size_in_bytes: usize) {
-        self.min_buffer_size = size_in_bytes;
+        self.min_buffer_size = Box::new(move |_: &[usize]| size_in_bytes);
+    }
+
+    /// Set the minimum size in bytes of the buffer to be connected to this port
+    pub fn set_minimum_buffer_size_relative(
+        &mut self,
+        size_function: impl Fn(&[usize]) -> usize + Send + 'static,
+    ) {
+        self.min_buffer_size = Box::new(size_function);
     }
 
     /// Get the minimum size in bytes of the buffer to be connected to this port, defaults to 0 if not set explicitly
-    pub fn get_minimum_buffer_size(&self) -> usize {
-        self.min_buffer_size
+    pub fn get_minimum_buffer_size(&self, actual_input_buffer_sizes: &[usize]) -> usize {
+        (self.min_buffer_size)(actual_input_buffer_sizes)
     }
 
     /// Get [`TypeId`] of items, handled by the port
@@ -561,6 +595,38 @@ impl StreamIoBuilder {
     pub fn add_output_with_size<T: Any>(mut self, name: &str, size: usize) -> StreamIoBuilder {
         let mut output = StreamOutput::new::<T>(name);
         output.set_minimum_buffer_size(size * std::mem::size_of::<T>());
+        self.outputs.push(output);
+        self
+    }
+
+    /// Add output port with minimum buffer size (in number of items)
+    #[must_use]
+    pub fn add_output_with_relative_size<T: Any>(
+        mut self,
+        name: &str,
+        size_func: fn(&[usize]) -> usize,
+    ) -> StreamIoBuilder {
+        let input_sizes: Vec<usize> = self
+            .inputs
+            .iter()
+            .map(|buf| buf.get_minimum_buffer_size() / buf.item_size())
+            .collect();
+        let size = size_func(&input_sizes);
+        let mut output = StreamOutput::new::<T>(name);
+        output.set_minimum_buffer_size(size * std::mem::size_of::<T>());
+        self.outputs.push(output);
+        self
+    }
+
+    /// Add output port with minimum buffer size (in number of items)
+    #[must_use]
+    pub fn add_output_with_size_relative_to_max_input<T: Any>(
+        mut self,
+        name: &str,
+        size_func: impl Fn(&[usize]) -> usize + Send + 'static,
+    ) -> StreamIoBuilder {
+        let mut output = StreamOutput::new::<T>(name);
+        output.set_minimum_buffer_size_relative(size_func);
         self.outputs.push(output);
         self
     }
