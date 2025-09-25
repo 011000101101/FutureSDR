@@ -17,10 +17,10 @@ use futuresdr::tracing::debug;
 use futuresdr::tracing::warn;
 use std::collections::VecDeque;
 
-use crate::Encoder;
-use crate::Modulator;
 use crate::utils::CodeRate;
 use crate::utils::SpreadingFactor;
+use crate::Encoder;
+use crate::Modulator;
 
 pub struct Transmitter {
     frames: VecDeque<Vec<u8>>,
@@ -48,7 +48,10 @@ impl Transmitter {
         TypedBlock::new(
             BlockMetaBuilder::new("Transmitter").build(),
             StreamIoBuilder::new()
-                .add_output::<Complex32>("out")
+                .add_output_with_size::<Complex32>(
+                    "out",
+                    spreading_factor.samples_per_symbol() * oversampling,
+                )
                 .build(),
             MessageIoBuilder::new()
                 .add_input("msg", Self::msg_handler)
