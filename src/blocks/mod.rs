@@ -262,6 +262,8 @@ mod zynq;
 pub use zynq::Zynq;
 mod burst_size_rewriter;
 pub use burst_size_rewriter::BurstSizeRewriter;
+mod burst_pad;
+pub use burst_pad::BurstPad;
 #[cfg(feature = "zynq")]
 mod zynq_sync;
 

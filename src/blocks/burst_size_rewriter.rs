@@ -15,6 +15,7 @@ use num_complex::Complex32;
 // const HACKRF_BLOCK_SIZE: usize = 12288;
 const HACKRF_BLOCK_SIZE: usize = 131072;
 
+#[derive(Debug)]
 enum StateTracker {
     HaveBurst(usize, usize, bool), // burst can be transmitted in chunks as long as there is enough space in out buffer, will start to transmit as many buffers as the output can fit
     // propagating the burst_start tag ensures the following blocks handle the samples as a unit, and the output buffer size requirement ensures the flowgraph does not stall on large bursts
@@ -76,7 +77,7 @@ impl BurstSizeRewriter<Complex32> {
     /// Create [`struct@BurstSizeRewriter`] block specifically to pad sample streams for the HackRF One to multiples of the transmit buffer, to ensure immediate and unbroken transmission of bursts
     pub fn new_for_hackrf() -> TypedBlock<Self> {
         let burst_size_function = |input_size_max_items: usize| {
-            (input_size_max_items as f64 / HACKRF_BLOCK_SIZE as f64).ceil() as usize
+            ((input_size_max_items as f64 / HACKRF_BLOCK_SIZE as f64).ceil() as usize).max(1)
                 * HACKRF_BLOCK_SIZE
         };
         let default_value_generator = || Complex32::default();
@@ -210,24 +211,31 @@ impl<T: core::marker::Copy + Send + Default + 'static> Kernel for BurstSizeRewri
         }
 
         if consumed > 0 {
-            debug!("consumed {consumed} samples");
+            // debug!("consumed {consumed} samples");
             sio.input(0).consume(consumed);
         }
         if produced > 0 {
-            debug!("produced {produced} samples");
+            // debug!("produced {produced} samples");
             sio.output(0).produce(produced);
         }
 
         if sio.input(0).finished() && consumed == num_samples_in_input {
             io.finished = true;
-        };
-
-        if consumed == 0 && produced == 0 {
-            debug!(
-                "consumed and produced nothing. state: num_samples_in_input {num_samples_in_input}, num_samples_in_output {num_slots_in_output}, io.call_again {}",
-                io.call_again
+        } else if sio.input(0).finished() {
+            warn!(
+                "burst_size_rewriter block not yet terminated: state={:?} samples_left_in_input={} num_slots_left_in_output={}",
+                self.state,
+                num_samples_in_input - consumed,
+                num_slots_in_output - produced
             );
         }
+
+        // if consumed == 0 && produced == 0 {
+        //     debug!(
+        //         "consumed and produced nothing. state: num_samples_in_input {num_samples_in_input}, num_samples_in_output {num_slots_in_output}, io.call_again {}",
+        //         io.call_again
+        //     );
+        // }
 
         Ok(())
     }
