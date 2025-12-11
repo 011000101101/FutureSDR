@@ -256,7 +256,15 @@ pub mod zeromq;
 mod zynq;
 #[cfg(all(feature = "zynq", target_os = "linux"))]
 pub use zynq::Zynq;
+mod burst_size_rewriter;
+pub use burst_size_rewriter::BurstSizeRewriter;
+mod burst_pad;
+pub use burst_pad::BurstPad;
+mod burst_split;
+pub use burst_split::BurstSplit;
+mod hackrf_one_util;
 #[cfg(all(feature = "zynq", target_os = "linux"))]
 mod zynq_sync;
+
 #[cfg(all(feature = "zynq", target_os = "linux"))]
 pub use zynq_sync::ZynqSync;

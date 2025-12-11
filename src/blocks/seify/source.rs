@@ -3,7 +3,6 @@ use seify::Device;
 use seify::DeviceTrait;
 use seify::Direction::Rx;
 use seify::RxStreamer;
-use std::time::Duration;
 
 use crate::blocks::seify::Config;
 use crate::prelude::*;
@@ -39,6 +38,7 @@ where
     dev: Device<D>,
     streamer: Option<D::RxStreamer>,
     start_time: Option<i64>,
+    terminate_in: Option<usize>,
     overflows: u64,
 }
 
@@ -60,6 +60,7 @@ where
             channels,
             dev,
             start_time,
+            terminate_in: None,
             streamer: None,
             overflows: 0,
         }
@@ -67,16 +68,20 @@ where
 
     async fn terminate(
         &mut self,
-        io: &mut WorkIo,
+        _io: &mut WorkIo,
         _mio: &mut MessageOutputs,
         _meta: &mut BlockMeta,
         p: Pmt,
     ) -> Result<Pmt> {
         match &p {
             Pmt::Ok => {
-                // allow some time for the RX streamer to receive any samples sent right before the sink terminated
-                async_io::Timer::after(Duration::from_secs_f32(0.5)).await;
-                io.finished = true
+                // allow some time (10ms) for the RX streamer to receive any samples sent right before the sink terminated
+                self.terminate_in = Some(
+                    (self
+                        .dev
+                        .sample_rate(Rx, *(self.channels.first().unwrap()))?
+                        * 0.01) as usize,
+                );
             }
             _ => return Ok(Pmt::InvalidValue),
         };
@@ -142,15 +147,39 @@ where
         _meta: &mut BlockMeta,
         p: Pmt,
     ) -> Result<Pmt> {
+        let new_sample_rate = match &p {
+            Pmt::F32(v) => *v as f64,
+            Pmt::F64(v) => *v,
+            Pmt::U32(v) => *v as f64,
+            Pmt::U64(v) => *v as f64,
+            Pmt::Null => {
+                return Ok(Pmt::F64(
+                    self.dev.sample_rate(
+                        Rx,
+                        *(self
+                            .channels
+                            .first()
+                            .ok_or(Error::SeifyError("Device has no channels.".to_string()))?),
+                    )?,
+                ));
+            }
+            _ => return Ok(Pmt::InvalidValue),
+        };
+
+        // update termination counter (if present) to keep remaining time constant
+        if let Some(terminate_in) = self.terminate_in {
+            let old_sample_rate = self.dev.sample_rate(
+                Rx,
+                *(self
+                    .channels
+                    .first()
+                    .ok_or(Error::SeifyError("Device has no channels.".to_string()))?),
+            )?;
+            self.terminate_in =
+                Some(((terminate_in as f64 / old_sample_rate) * new_sample_rate) as usize);
+        }
         for c in &self.channels {
-            match &p {
-                Pmt::F32(v) => self.dev.set_sample_rate(Rx, *c, *v as f64)?,
-                Pmt::F64(v) => self.dev.set_sample_rate(Rx, *c, *v)?,
-                Pmt::U32(v) => self.dev.set_sample_rate(Rx, *c, *v as f64)?,
-                Pmt::U64(v) => self.dev.set_sample_rate(Rx, *c, *v as f64)?,
-                Pmt::Null => return Ok(Pmt::F64(self.dev.sample_rate(Rx, *c)?)),
-                _ => return Ok(Pmt::InvalidValue),
-            };
+            self.dev.set_sample_rate(Rx, *c, new_sample_rate)?;
         }
         Ok(Pmt::Ok)
     }
@@ -210,6 +239,9 @@ where
         match streamer.read(&mut bufs, 500_000) {
             Ok(len) => {
                 self.outputs.iter_mut().for_each(|o| o.produce(len));
+                if let Some(terminate_in) = self.terminate_in {
+                    self.terminate_in = Some(terminate_in.saturating_sub(len));
+                }
             }
             Err(seify::Error::Overflow) => {
                 self.overflows += 1;
@@ -220,6 +252,10 @@ where
                 io.finished = true;
             }
         }
+
+        if let Some(0) = self.terminate_in {
+            io.finished = true
+        };
 
         io.call_again = true;
         Ok(())

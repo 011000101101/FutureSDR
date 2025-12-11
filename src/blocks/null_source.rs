@@ -16,6 +16,7 @@ use crate::prelude::*;
 /// let src = NullSource::<u8>::new();
 /// ```
 #[derive(Block)]
+#[message_inputs(message_handler)]
 pub struct NullSource<T: Send + 'static, O: CpuBufferWriter<Item = T> = DefaultCpuWriter<T>> {
     #[output]
     output: O,
@@ -31,6 +32,23 @@ where
         Self {
             output: O::default(),
         }
+    }
+
+    async fn message_handler(
+        &mut self,
+        io: &mut WorkIo,
+        _mio: &mut MessageOutputs,
+        _meta: &mut BlockMeta,
+        pmt: Pmt,
+    ) -> Result<Pmt> {
+        match pmt {
+            Pmt::Finished => io.finished = true,
+            _ => {
+                warn!("expected Pmt::finished, got {:?}", pmt);
+                return Ok(Pmt::InvalidValue);
+            }
+        }
+        Ok(Pmt::Null)
     }
 }
 
